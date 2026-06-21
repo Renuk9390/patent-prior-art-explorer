@@ -1,0 +1,18 @@
+# Gradio itself is intentionally NOT listed here -- on a "sdk: gradio"
+# HuggingFace Space, the platform provisions Gradio based on the
+# `sdk_version` field in README.md's YAML frontmatter. Listing it again
+# here would be redundant and risks a version mismatch with that field.
+#
+# Everything below is free, CPU-friendly, and has no paid/rate-limited
+# dependency for the demo's CORE functionality to work.
+
+sentence-transformers>=3.0
+faiss-cpu>=1.7.4
+pypdf>=4.0
+numpy<3
+
+# Optional: only used by pipeline/explain.py's llm_explain(), and only
+# if a GROQ_API_KEY secret is configured on the Space. Safe to leave
+# installed even if that secret is never set -- the import is wrapped
+# in a try/except and the feature silently no-ops without a key.
+groq>=0.4.0
