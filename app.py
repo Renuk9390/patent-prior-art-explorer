@@ -259,7 +259,7 @@ def build_app() -> gr.Blocks:
             "open components \u2014 search a curated set of real granted "
             "patents by **meaning**, not just keywords, and see exactly "
             "**why** each result matched.\n\n"
-            "Built by [Renukswamy Chikkamath](https://your-website-url-here)"
+            "Built by [Renukswamy Chikkamath](https://renukswamy.com/)"
             ", based on his PhD research in AI for patent retrieval and "
             "explainable prior-art search."
         )
