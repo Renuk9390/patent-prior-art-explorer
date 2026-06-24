@@ -57,157 +57,159 @@ CUSTOM_CSS = """
 
 /* ── result card ───────────────────────────────────────────── */
 .result-card {
-    border: 1px solid #e3e8ef;
-    border-radius: 14px;
-    padding: 16px;
-    margin-bottom: 16px;
-    background: #ffffff;
-    overflow-wrap: break-word;
-    word-break: break-word;
+    border: 1px solid #e3e8ef !important;
+    border-radius: 14px !important;
+    padding: 16px !important;
+    margin-bottom: 16px !important;
+    background: #ffffff !important;
+    overflow-wrap: break-word !important;
+    word-break: break-word !important;
+    width: 100% !important;
 }
 @media (min-width: 640px) {
-    .result-card { padding: 20px 22px; }
+    .result-card { padding: 20px 22px !important; }
 }
 
 /* ── card header ───────────────────────────────────────────── */
 .result-header {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 6px;
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 6px !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+    margin-bottom: 6px !important;
 }
 .result-domain {
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: #c2880a;
-    font-weight: 700;
+    font-size: 10px !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.08em !important;
+    color: #c2880a !important;
+    font-weight: 700 !important;
 }
 .result-score {
-    font-size: 11px;
-    font-family: monospace;
-    color: #6b7280;
-    background: #f3f5f8;
-    padding: 2px 8px;
-    border-radius: 999px;
-    white-space: nowrap;
+    font-size: 11px !important;
+    font-family: monospace !important;
+    color: #374151 !important;
+    background: #f3f5f8 !important;
+    padding: 2px 8px !important;
+    border-radius: 999px !important;
+    white-space: nowrap !important;
 }
 .result-title {
-    margin: 4px 0 10px 0;
-    font-size: 15px;
-    line-height: 1.4;
+    margin: 4px 0 10px 0 !important;
+    font-size: 15px !important;
+    line-height: 1.4 !important;
+    color: #0b1220 !important;
 }
 @media (min-width: 640px) {
-    .result-title { font-size: 16px; }
+    .result-title { font-size: 16px !important; }
 }
 .result-id a {
-    font-weight: 400;
-    font-size: 12px;
-    color: #6b7280;
-    word-break: break-all;
+    font-weight: 400 !important;
+    font-size: 12px !important;
+    color: #4b5b71 !important;
+    word-break: break-all !important;
+    text-decoration: underline !important;
 }
 
 /* ── retrieved passage with highlighted evidence ───────────── */
 .result-snippet {
-    font-size: 13px;
-    line-height: 1.65;
-    color: #374151;
+    font-size: 13px !important;
+    line-height: 1.65 !important;
+    color: #1f2937 !important;
 }
 @media (min-width: 640px) {
-    .result-snippet { font-size: 14px; }
+    .result-snippet { font-size: 14px !important; }
 }
 .result-snippet mark {
-    background: #faf0d8;
-    color: #11203a;
-    padding: 0 2px;
-    border-radius: 3px;
-    font-style: normal;
+    background: #fef3c7 !important;
+    color: #0b1220 !important;
+    padding: 1px 3px !important;
+    border-radius: 3px !important;
+    font-style: normal !important;
 }
 
 /* ── LLM analysis panel ────────────────────────────────────── */
 .llm-panel {
-    margin-top: 14px;
-    border-top: 1px solid #e3e8ef;
-    padding-top: 14px;
+    margin-top: 14px !important;
+    border-top: 2px solid #e3e8ef !important;
+    padding-top: 14px !important;
 }
 .llm-panel-header {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin-bottom: 12px;
-    font-size: 10px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.10em;
-    color: #8b99ad;
+    display: flex !important;
+    align-items: center !important;
+    gap: 6px !important;
+    margin-bottom: 12px !important;
+    font-size: 10px !important;
+    font-weight: 700 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.10em !important;
+    color: #6b7280 !important;
 }
 
 /* ── individual analysis sections ──────────────────────────── */
 .llm-section {
-    margin-bottom: 10px;
+    margin-bottom: 12px !important;
 }
 .llm-section-label {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    font-size: 10px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    margin-bottom: 5px;
+    display: flex !important;
+    align-items: center !important;
+    gap: 5px !important;
+    margin-bottom: 7px !important;
 }
-.llm-section-label.concepts  { color: #0b6e4f; }
-.llm-section-label.elements  { color: #1e56a0; }
-.llm-section-label.relevance { color: #7c3aed; }
-
 .llm-tag {
-    display: inline-block;
-    padding: 1px 6px;
-    border-radius: 4px;
-    font-size: 10px;
-    font-weight: 600;
+    display: inline-block !important;
+    padding: 3px 10px !important;
+    border-radius: 5px !important;
+    font-size: 10px !important;
+    font-weight: 700 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.06em !important;
 }
-.llm-tag.concepts  { background: #d1fae5; color: #065f46; }
-.llm-tag.elements  { background: #dbeafe; color: #1e3a5f; }
-.llm-tag.relevance { background: #ede9fe; color: #5b21b6; }
+.llm-tag.concepts  { background: #d1fae5 !important; color: #064e3b !important; }
+.llm-tag.elements  { background: #dbeafe !important; color: #1e3a5f !important; }
+.llm-tag.relevance { background: #ede9fe !important; color: #4c1d95 !important; }
 
+/* Concept pills — green tinted */
 .llm-bullet-list {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 5px;
+    list-style: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 6px !important;
 }
 .llm-bullet-list li {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    font-size: 12px;
-    color: #374151;
-    background: #f8fafc;
-    border: 1px solid #e3e8ef;
-    border-radius: 6px;
-    padding: 3px 8px;
-    line-height: 1.4;
+    display: inline-flex !important;
+    font-size: 12px !important;
+    color: #064e3b !important;
+    background: #ecfdf5 !important;
+    border: 1px solid #6ee7b7 !important;
+    border-radius: 6px !important;
+    padding: 4px 10px !important;
+    line-height: 1.4 !important;
+    font-weight: 500 !important;
 }
+/* Element pills — blue tinted, override the base li rule */
 .llm-bullet-list.elements li {
-    background: #f0f6ff;
-    border-color: #bfdbfe;
-    color: #1e3a5f;
+    color: #1e3a5f !important;
+    background: #eff6ff !important;
+    border: 1px solid #93c5fd !important;
+    font-weight: 400 !important;
 }
+
+/* Relevance block */
 .llm-relevance-text {
-    font-size: 13px;
-    line-height: 1.6;
-    color: #4b5563;
-    font-style: italic;
-    background: #faf8ff;
-    border-left: 3px solid #7c3aed;
-    padding: 8px 12px;
-    border-radius: 0 6px 6px 0;
-    margin: 0;
+    font-size: 13px !important;
+    line-height: 1.7 !important;
+    color: #1f2937 !important;
+    font-style: italic !important;
+    background: #f5f3ff !important;
+    border-left: 3px solid #7c3aed !important;
+    padding: 10px 14px !important;
+    border-radius: 0 6px 6px 0 !important;
+    margin: 0 !important;
+    display: block !important;
 }
 """
 
