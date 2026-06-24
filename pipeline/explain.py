@@ -79,14 +79,56 @@ def llm_explain(query: str, chunk_text: str, highlighted: list[str]) -> str | No
         client = Groq(api_key=api_key, timeout=_GROQ_TIMEOUT_SECONDS)
         evidence = " ".join(highlighted) if highlighted else chunk_text[:300]
         prompt = (
-            "You are helping a patent analyst understand a prior-art search "
-            "result. In one short sentence (max 30 words), explain in plain "
-            "language why the passage below is conceptually related to the "
-            "search query, even if the exact words differ.\n\n"
-            f"Search query: {query}\n"
-            f"Passage: {evidence}\n\n"
-            "Explanation:"
-        )
+    "You are assisting a patent attorney performing prior-art analysis.\n\n"
+    
+    "You are given:\n"
+    "1. A patent search query, invention concept, or claim-related search.\n"
+    "2. A retrieved prior-art passage.\n"
+    "3. Evidence sentences already identified as highly relevant.\n\n"
+
+    "Your task is to:\n\n"
+
+    "A. MATCHING TECHNICAL CONCEPTS\n"
+    "- Identify the key technical concepts, components, functions, "
+    "relationships, or mechanisms in the passage that are semantically "
+    "related to the search query.\n\n"
+
+    "B. POTENTIAL CLAIM ELEMENTS SUPPORTED\n"
+    "- Extract technical features or claim-like limitations that appear "
+    "to be disclosed in the passage.\n"
+    "- Focus on structures, components, functions, processes, "
+    "relationships, or technical effects.\n"
+    "- Keep each element concise.\n\n"
+
+    "C. RELEVANCE EXPLANATION\n"
+    "- Explain in 1-2 concise sentences why the passage may be relevant "
+    "for prior-art assessment.\n"
+    "- Mention conceptual overlap even if exact wording differs.\n\n"
+
+    "Rules:\n"
+    "- Do NOT make legal conclusions.\n"
+    "- Do NOT state that a claim is novel, anticipated, patentable, "
+    "or invalid.\n"
+    "- Do NOT invent features that are not reasonably supported by the passage.\n"
+    "- If support appears weak or indirect, explicitly state that.\n"
+    "- Focus only on the provided evidence passage.\n\n"
+
+    "Return ONLY in the following format:\n\n"
+
+    "MATCHING CONCEPTS:\n"
+    "- concept 1\n"
+    "- concept 2\n\n"
+
+    "POTENTIAL SUPPORTED ELEMENTS:\n"
+    "- element 1\n"
+    "- element 2\n\n"
+
+    "RELEVANCE:\n"
+    "Short explanation.\n\n"
+
+    f"Search Query:\n{query}\n\n"
+    f"Evidence Passage:\n{evidence}\n"
+)
         response = client.chat.completions.create(
             model=_GROQ_MODEL,
             messages=[{"role": "user", "content": prompt}],
