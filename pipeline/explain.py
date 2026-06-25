@@ -79,45 +79,92 @@ def llm_explain(query: str, chunk_text: str, highlighted: list[str]) -> str | No
         client = Groq(api_key=api_key, timeout=_GROQ_TIMEOUT_SECONDS)
         evidence = chunk_text.strip()
         prompt = (
-            "You are assisting a patent attorney performing prior-art analysis.\n\n"
-            "You are given:\n"
-            "1. A patent search query, invention concept, or claim-related search.\n"
-            "2. A retrieved prior-art passage.\n"
-            "3. Evidence sentences already identified as highly relevant.\n\n"
-            "Your task is to:\n\n"
-            "A. MATCHING TECHNICAL CONCEPTS\n"
-            "- Identify the key technical concepts, components, functions, "
-            "relationships, or mechanisms in the passage that are semantically "
-            "related to the search query.\n\n"
-            "B. POTENTIAL CLAIM ELEMENTS SUPPORTED\n"
-            "- Extract technical features or claim-like limitations that appear "
-            "to be disclosed in the passage.\n"
-            "- Focus on structures, components, functions, processes, "
-            "relationships, or technical effects.\n"
-            "- Keep each element concise.\n\n"
-            "C. RELEVANCE EXPLANATION\n"
-            "- Explain in 1-2 concise sentences why the passage may be relevant "
-            "for prior-art assessment.\n"
-            "- Mention conceptual overlap even if exact wording differs.\n\n"
-            "Rules:\n"
-            "- Do NOT make legal conclusions.\n"
-            "- Do NOT state that a claim is novel, anticipated, patentable, "
-            "or invalid.\n"
-            "- Do NOT invent features that are not reasonably supported by the passage.\n"
-            "- If support appears weak or indirect, explicitly state that.\n"
-            "- Focus only on the provided evidence passage.\n\n"
-            "Return ONLY in the following format:\n\n"
-            "MATCHING CONCEPTS:\n"
-            "- concept 1\n"
-            "- concept 2\n\n"
-            "POTENTIAL SUPPORTED ELEMENTS:\n"
-            "- element 1\n"
-            "- element 2\n\n"
-            "RELEVANCE:\n"
-            "Short explanation.\n\n"
-            f"Search Query:\n{query}\n\n"
-            f"Evidence Passage:\n{evidence}\n"
-        )
+"You are assisting a patent attorney performing prior-art analysis.\n\n"
+
+```
+"You are given:\n"
+"1. A patent search query, invention concept, or claim-related search.\n"
+"2. A retrieved prior-art passage.\n"
+"3. Evidence sentences already identified as highly relevant.\n\n"
+
+"Your task is to:\n\n"
+
+"A. MATCHING TECHNICAL CONCEPTS\n"
+"- Identify the key technical concepts, components, functions, "
+"relationships, or mechanisms in the passage that are semantically "
+"related to the search query.\n\n"
+
+"B. POTENTIAL CLAIM ELEMENTS SUPPORTED\n"
+"- Infer claim-like technical limitations from the search query "
+"and the evidence passage.\n"
+"- Focus on structures, components, functions, processes, "
+"relationships, or technical effects.\n"
+"- Keep each element concise.\n\n"
+
+"C. RELEVANCE EXPLANATION\n"
+"- Explain in 1-2 concise sentences why the passage may be relevant "
+"for prior-art assessment.\n"
+"- Mention conceptual overlap even if exact wording differs.\n\n"
+
+"D. NOVELTY GAP GRAPH\n"
+"- Create a graph representation.\n"
+"- Treat inferred claim-like elements as CLAIM nodes.\n"
+"- Treat supporting phrases from the passage as EVIDENCE nodes.\n"
+"- Create SUPPORT EDGES where evidence appears to support a claim element.\n"
+"- Create GRAPH GAPS where no supporting evidence is found.\n"
+"- Use only information reasonably supported by the passage.\n"
+"- If support is uncertain, indicate '(weak)' instead of '(strong)'.\n\n"
+
+"Rules:\n"
+"- Do NOT make legal conclusions.\n"
+"- Do NOT state that a claim is novel, anticipated, patentable, "
+"or invalid.\n"
+"- Do NOT invent features that are not reasonably supported by the passage.\n"
+"- If support appears weak or indirect, explicitly indicate this.\n"
+"- Focus only on the provided evidence passage.\n\n"
+
+"Return ONLY in the following format:\n\n"
+
+"MATCHING CONCEPTS:\n"
+"- concept 1\n"
+"- concept 2\n\n"
+
+"POTENTIAL SUPPORTED ELEMENTS:\n"
+"- element 1\n"
+"- element 2\n\n"
+
+"RELEVANCE:\n"
+"Short explanation.\n\n"
+
+"NOVELTY GAP GRAPH\n\n"
+
+"GRAPH NODES\n\n"
+
+"CLAIM:\n"
+"C1: ...\n"
+"C2: ...\n"
+"C3: ...\n\n"
+
+"EVIDENCE:\n"
+"E1: ...\n"
+"E2: ...\n"
+"E3: ...\n\n"
+
+"GRAPH EDGES\n\n"
+"C1 -> E1 (strong)\n"
+"C2 -> E2 (strong)\n"
+"C3 -> E3 (weak)\n\n"
+
+"GRAPH GAPS\n\n"
+"C4 -> NONE\n"
+"C5 -> NONE\n\n"
+
+f"Search Query:\n{query}\n\n"
+f"Evidence Passage:\n{evidence}\n"
+```
+
+)
+
         response = client.chat.completions.create(
             model=_GROQ_MODEL,
             messages=[{"role": "user", "content": prompt}],
