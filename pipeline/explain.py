@@ -80,8 +80,6 @@ def llm_explain(query: str, chunk_text: str, highlighted: list[str]) -> str | No
         evidence = chunk_text.strip()
         prompt = (
 "You are assisting a patent attorney performing prior-art analysis.\n\n"
-
-```
 "You are given:\n"
 "1. A patent search query, invention concept, or claim-related search.\n"
 "2. A retrieved prior-art passage.\n"
@@ -161,7 +159,6 @@ def llm_explain(query: str, chunk_text: str, highlighted: list[str]) -> str | No
 
 f"Search Query:\n{query}\n\n"
 f"Evidence Passage:\n{evidence}\n"
-```
 
 )
 
