@@ -4,42 +4,34 @@ Explainability layer.
 Two parts, deliberately layered so the demo never depends on the
 fragile one to function:
 
-  1. `explain_match()` -- always runs. Fully local, free, and
-     deterministic. Splits the matched chunk into sentences, scores
-     each sentence's embedding similarity to the query using the same
-     model already loaded for retrieval, and returns the top-scoring
-     sentences as the "evidence" driving the match. This is what makes
-     highlighting work even when the query's exact words don't appear
-     anywhere in the passage.
+  1. `explain_match()` -- always runs. Fully local, free, deterministic.
+     Splits the matched chunk into sentences, scores each sentence's
+     embedding similarity to the query, and returns the top-scoring
+     sentences as evidence for highlighting.
 
-  2. `llm_explain()` -- optional. If a GROQ_API_KEY secret is configured
-     on the Space, asks a fast, free-tier Llama model for a short,
-     plain-language explanation of the match, on top of the
-     embedding-based evidence above. Wrapped in a broad try/except with
-     a short timeout: if the key is missing, the API is slow, or the
-     call fails for any reason, this returns None and the UI silently
-     falls back to the embedding-based explanation alone. The demo's
-     core functionality never depends on this layer succeeding.
+  2. `llm_explain()` -- optional. If GROQ_API_KEY is configured, calls
+     a free Groq-hosted LLM for structured prior-art analysis including
+     a Novelty Gap Graph. Returns None (never raises) on any failure.
+
+  3. `parse_novelty_graph()` -- parses the NOVELTY GAP GRAPH section
+     of an LLM response into structured node/edge data ready to render.
 """
 
 from __future__ import annotations
 
 import html
 import os
+import re
 
 from .chunking import split_sentences
 from .embeddings import embed_passages, embed_query
 
 _GROQ_MODEL = "llama-3.1-8b-instant"
-_GROQ_TIMEOUT_SECONDS = 15
+_GROQ_TIMEOUT_SECONDS = 20
 
 
 def explain_match(query: str, chunk_text: str, top_n: int = 2) -> dict:
-    """Score each sentence in `chunk_text` against the query.
-
-    Returns a dict with every sentence's similarity score, plus the
-    top `top_n` sentences flagged as the highlighted evidence.
-    """
+    """Score each sentence in `chunk_text` against the query."""
     sentences = split_sentences(chunk_text)
     if not sentences:
         return {"sentences": [], "highlighted": []}
@@ -63,11 +55,11 @@ def explain_match(query: str, chunk_text: str, top_n: int = 2) -> dict:
 
 
 def llm_explain(query: str, chunk_text: str, highlighted: list[str]) -> str | None:
-    """Best-effort, plain-language explanation via a free Groq-hosted LLM.
+    """Best-effort structured prior-art analysis via a free Groq LLM.
 
-    Returns None (never raises) if GROQ_API_KEY isn't configured or the
-    call fails for any reason -- this layer is a nice-to-have polish on
-    top of `explain_match()`, never a dependency for the demo to work.
+    Returns the raw LLM text string (covering all four sections:
+    MATCHING CONCEPTS, POTENTIAL SUPPORTED ELEMENTS, RELEVANCE, and
+    NOVELTY GAP GRAPH) or None on any failure.
     """
     api_key = os.environ.get("GROQ_API_KEY")
     if not api_key:
@@ -78,113 +70,159 @@ def llm_explain(query: str, chunk_text: str, highlighted: list[str]) -> str | No
 
         client = Groq(api_key=api_key, timeout=_GROQ_TIMEOUT_SECONDS)
         evidence = chunk_text.strip()
+
         prompt = (
-"You are assisting a patent attorney performing prior-art analysis.\n\n"
-"You are given:\n"
-"1. A patent search query, invention concept, or claim-related search.\n"
-"2. A retrieved prior-art passage.\n"
-"3. Evidence sentences already identified as highly relevant.\n\n"
-
-"Your task is to:\n\n"
-
-"A. MATCHING TECHNICAL CONCEPTS\n"
-"- Identify the key technical concepts, components, functions, "
-"relationships, or mechanisms in the passage that are semantically "
-"related to the search query.\n\n"
-
-"B. POTENTIAL CLAIM ELEMENTS SUPPORTED\n"
-"- Infer claim-like technical limitations from the search query "
-"and the evidence passage.\n"
-"- Focus on structures, components, functions, processes, "
-"relationships, or technical effects.\n"
-"- Keep each element concise.\n\n"
-
-"C. RELEVANCE EXPLANATION\n"
-"- Explain in 1-2 concise sentences why the passage may be relevant "
-"for prior-art assessment.\n"
-"- Mention conceptual overlap even if exact wording differs.\n\n"
-
-"D. NOVELTY GAP GRAPH\n"
-"- Create a graph representation.\n"
-"- Treat inferred claim-like elements as CLAIM nodes.\n"
-"- Treat supporting phrases from the passage as EVIDENCE nodes.\n"
-"- Create SUPPORT EDGES where evidence appears to support a claim element.\n"
-"- Create GRAPH GAPS where no supporting evidence is found.\n"
-"- Use only information reasonably supported by the passage.\n"
-"- If support is uncertain, indicate '(weak)' instead of '(strong)'.\n\n"
-
-"Rules:\n"
-"- Do NOT make legal conclusions.\n"
-"- Do NOT state that a claim is novel, anticipated, patentable, "
-"or invalid.\n"
-"- Do NOT invent features that are not reasonably supported by the passage.\n"
-"- If support appears weak or indirect, explicitly indicate this.\n"
-"- Focus only on the provided evidence passage.\n\n"
-
-"Return ONLY in the following format:\n\n"
-
-"MATCHING CONCEPTS:\n"
-"- concept 1\n"
-"- concept 2\n\n"
-
-"POTENTIAL SUPPORTED ELEMENTS:\n"
-"- element 1\n"
-"- element 2\n\n"
-
-"RELEVANCE:\n"
-"Short explanation.\n\n"
-
-"NOVELTY GAP GRAPH\n\n"
-
-"GRAPH NODES\n\n"
-
-"CLAIM:\n"
-"C1: ...\n"
-"C2: ...\n"
-"C3: ...\n\n"
-
-"EVIDENCE:\n"
-"E1: ...\n"
-"E2: ...\n"
-"E3: ...\n\n"
-
-"GRAPH EDGES\n\n"
-"C1 -> E1 (strong)\n"
-"C2 -> E2 (strong)\n"
-"C3 -> E3 (weak)\n\n"
-
-"GRAPH GAPS\n\n"
-"C4 -> NONE\n"
-"C5 -> NONE\n\n"
-
-f"Search Query:\n{query}\n\n"
-f"Evidence Passage:\n{evidence}\n"
-
-)
+            "You are assisting a patent attorney performing prior-art analysis.\n\n"
+            "You are given:\n"
+            "1. A patent search query, invention concept, or claim-related search.\n"
+            "2. A retrieved prior-art passage.\n"
+            "3. Evidence sentences already identified as highly relevant.\n\n"
+            "Your task is to:\n\n"
+            "A. MATCHING TECHNICAL CONCEPTS\n"
+            "- Identify the key technical concepts, components, functions, "
+            "relationships, or mechanisms in the passage that are semantically "
+            "related to the search query.\n\n"
+            "B. POTENTIAL CLAIM ELEMENTS SUPPORTED\n"
+            "- Infer claim-like technical limitations from the search query "
+            "and the evidence passage.\n"
+            "- Focus on structures, components, functions, processes, "
+            "relationships, or technical effects.\n"
+            "- Keep each element concise.\n\n"
+            "C. RELEVANCE EXPLANATION\n"
+            "- Explain in 1-2 concise sentences why the passage may be relevant "
+            "for prior-art assessment.\n"
+            "- Mention conceptual overlap even if exact wording differs.\n\n"
+            "D. NOVELTY GAP GRAPH\n"
+            "- Create a graph representation.\n"
+            "- Treat inferred claim-like elements as CLAIM nodes.\n"
+            "- Treat supporting phrases from the passage as EVIDENCE nodes.\n"
+            "- Create SUPPORT EDGES where evidence appears to support a claim element.\n"
+            "- Create GRAPH GAPS where no supporting evidence is found.\n"
+            "- Use only information reasonably supported by the passage.\n"
+            "- If support is uncertain, indicate '(weak)' instead of '(strong)'.\n\n"
+            "Rules:\n"
+            "- Do NOT make legal conclusions.\n"
+            "- Do NOT state that a claim is novel, anticipated, patentable, "
+            "or invalid.\n"
+            "- Do NOT invent features that are not reasonably supported by the passage.\n"
+            "- If support appears weak or indirect, explicitly indicate this.\n"
+            "- Focus only on the provided evidence passage.\n\n"
+            "Return ONLY in the following format:\n\n"
+            "MATCHING CONCEPTS:\n"
+            "- concept 1\n"
+            "- concept 2\n\n"
+            "POTENTIAL SUPPORTED ELEMENTS:\n"
+            "- element 1\n"
+            "- element 2\n\n"
+            "RELEVANCE:\n"
+            "Short explanation.\n\n"
+            "NOVELTY GAP GRAPH\n\n"
+            "GRAPH NODES\n\n"
+            "CLAIM:\n"
+            "C1: ...\n"
+            "C2: ...\n\n"
+            "EVIDENCE:\n"
+            "E1: ...\n"
+            "E2: ...\n\n"
+            "GRAPH EDGES\n"
+            "C1 -> E1 (strong)\n"
+            "C2 -> E2 (weak)\n\n"
+            "GRAPH GAPS\n"
+            "C3 -> NONE\n\n"
+            f"Search Query:\n{query}\n\n"
+            f"Evidence Passage:\n{evidence}\n"
+        )
 
         response = client.chat.completions.create(
             model=_GROQ_MODEL,
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=350,
+            max_tokens=600,
             temperature=0.2,
         )
         text = response.choices[0].message.content
         return text.strip() if text else None
     except Exception:
-        # Network error, missing/invalid key, rate limit, SDK not
-        # installed, malformed response -- any failure here should be
-        # invisible to the visitor, not a broken demo.
         return None
 
 
-def highlight_html(chunk_text: str, highlighted: list[str]) -> str:
-    """Wrap highlighted sentences in <mark> tags, safely.
+def parse_novelty_graph(llm_text: str) -> dict:
+    """Parse the NOVELTY GAP GRAPH section of an LLM response.
 
-    Escapes the base text and the sentences being matched against it
-    *before* comparing/inserting markup, so a chunk of text containing
-    raw `<`, `>`, or `&` characters (which can happen with PDF-extracted
-    text) can never break the surrounding HTML.
+    Returns a dict with:
+      claims   : {node_id: label}  e.g. {"C1": "wireless communication link"}
+      evidence : {node_id: label}  e.g. {"E1": "A wireless comm link is established..."}
+      edges    : list of (source, target, weight)  e.g. [("C1", "E1", "strong")]
+      gaps     : list of claim node_ids with no evidence  e.g. ["C4", "C5"]
     """
+    result: dict = {"claims": {}, "evidence": {}, "edges": [], "gaps": []}
+
+    # Locate the NOVELTY GAP GRAPH block first
+    graph_match = re.search(
+        r"NOVELTY GAP GRAPH(.+?)(?=$)", llm_text, re.IGNORECASE | re.DOTALL
+    )
+    if not graph_match:
+        return result
+    graph_block = graph_match.group(1)
+
+    # ── CLAIM nodes ──────────────────────────────────────────────
+    claim_block = re.search(
+        r"CLAIM:\s*\n(.*?)(?=EVIDENCE:|GRAPH EDGES|GRAPH GAPS|$)",
+        graph_block,
+        re.IGNORECASE | re.DOTALL,
+    )
+    if claim_block:
+        for line in claim_block.group(1).splitlines():
+            m = re.match(r"\s*(C\d+)\s*:\s*(.+)", line, re.IGNORECASE)
+            if m:
+                result["claims"][m.group(1).upper()] = m.group(2).strip()
+
+    # ── EVIDENCE nodes ────────────────────────────────────────────
+    evidence_block = re.search(
+        r"EVIDENCE:\s*\n(.*?)(?=GRAPH EDGES|GRAPH GAPS|$)",
+        graph_block,
+        re.IGNORECASE | re.DOTALL,
+    )
+    if evidence_block:
+        for line in evidence_block.group(1).splitlines():
+            m = re.match(r"\s*(E\d+)\s*:\s*(.+)", line, re.IGNORECASE)
+            if m:
+                result["evidence"][m.group(1).upper()] = m.group(2).strip()
+
+    # ── GRAPH EDGES ───────────────────────────────────────────────
+    edges_block = re.search(
+        r"GRAPH EDGES\s*\n(.*?)(?=GRAPH GAPS|$)",
+        graph_block,
+        re.IGNORECASE | re.DOTALL,
+    )
+    if edges_block:
+        for line in edges_block.group(1).splitlines():
+            m = re.match(
+                r"\s*(C\d+)\s*->\s*(E\d+)\s*\((\w+)\)",
+                line,
+                re.IGNORECASE,
+            )
+            if m:
+                result["edges"].append(
+                    (m.group(1).upper(), m.group(2).upper(), m.group(3).lower())
+                )
+
+    # ── GRAPH GAPS ────────────────────────────────────────────────
+    gaps_block = re.search(
+        r"GRAPH GAPS\s*\n(.+?)$",
+        graph_block,
+        re.IGNORECASE | re.DOTALL,
+    )
+    if gaps_block:
+        for line in gaps_block.group(1).splitlines():
+            m = re.match(r"\s*(C\d+)\s*->\s*NONE", line, re.IGNORECASE)
+            if m:
+                result["gaps"].append(m.group(1).upper())
+
+    return result
+
+
+def highlight_html(chunk_text: str, highlighted: list[str]) -> str:
+    """Wrap highlighted sentences in <mark> tags, safely HTML-escaped."""
     escaped = html.escape(chunk_text)
     for sentence in sorted(highlighted, key=len, reverse=True):
         escaped_sentence = html.escape(sentence)
