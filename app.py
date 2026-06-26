@@ -37,7 +37,7 @@ import gradio as gr
 from corpus import CORPUS
 from pipeline.chunking import chunk_text, extract_pdf_text
 from pipeline.embeddings import embed_passages, embed_query
-from pipeline.explain import explain_match, highlight_html, llm_explain
+from pipeline.explain import explain_match, highlight_html, llm_explain, parse_novelty_graph
 from pipeline.vectorstore import Chunk, VectorStore
 
 TOP_K = 5
@@ -211,6 +211,135 @@ CUSTOM_CSS = """
     margin: 0 !important;
     display: block !important;
 }
+
+/* ── collapsible <details> panels ──────────────────────────── */
+.llm-details, .graph-details {
+    margin-top: 10px !important;
+    border-radius: 10px !important;
+    overflow: hidden !important;
+    border: 1px solid #e3e8ef !important;
+}
+.llm-details > summary, .graph-details > summary {
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+    padding: 10px 14px !important;
+    font-size: 11px !important;
+    font-weight: 700 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.10em !important;
+    cursor: pointer !important;
+    user-select: none !important;
+    list-style: none !important;
+}
+.llm-details > summary::-webkit-details-marker { display: none !important; }
+.llm-details > summary { background: #f8fafc !important; color: #374151 !important; }
+.graph-details > summary { background: #f0f9ff !important; color: #075985 !important; }
+.llm-details[open] > summary { border-bottom: 1px solid #e3e8ef !important; }
+.graph-details[open] > summary { border-bottom: 1px solid #bae6fd !important; }
+.summary-chevron {
+    margin-left: auto !important;
+    font-size: 10px !important;
+    color: #9ca3af !important;
+}
+.llm-details-body, .graph-details-body {
+    padding: 14px !important;
+    background: #ffffff !important;
+}
+
+/* ── Novelty Gap Graph ──────────────────────────────────────── */
+.ngraph-columns {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 12px !important;
+    margin-bottom: 14px !important;
+}
+.ngraph-col-header {
+    font-size: 10px !important;
+    font-weight: 700 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.08em !important;
+    margin-bottom: 8px !important;
+}
+.ngraph-col-header.claim-header   { color: #1d4ed8 !important; }
+.ngraph-col-header.evidence-header { color: #15803d !important; }
+.ngraph-node {
+    border-radius: 8px !important;
+    padding: 7px 10px !important;
+    margin-bottom: 6px !important;
+    font-size: 12px !important;
+    line-height: 1.4 !important;
+    color: #1e3a5f !important;
+}
+.ngraph-node .node-id {
+    font-weight: 700 !important;
+    font-size: 11px !important;
+    margin-right: 4px !important;
+}
+.ngraph-node.claim-node {
+    background: #eff6ff !important;
+    border: 1px solid #93c5fd !important;
+    color: #1e3a5f !important;
+}
+.ngraph-node.claim-node .node-id { color: #1d4ed8 !important; }
+.ngraph-node.gap-node {
+    background: #fff7ed !important;
+    border: 1px solid #fdba74 !important;
+    color: #7c2d12 !important;
+}
+.ngraph-node.gap-node .node-id { color: #c2410c !important; }
+.ngraph-node.evidence-node {
+    background: #f0fdf4 !important;
+    border: 1px solid #86efac !important;
+    color: #14532d !important;
+}
+.ngraph-node.evidence-node .node-id { color: #15803d !important; }
+.ngraph-edges-header, .ngraph-gaps-header {
+    font-size: 10px !important;
+    font-weight: 700 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.08em !important;
+    margin: 12px 0 6px 0 !important;
+}
+.ngraph-edges-header { color: #374151 !important; }
+.ngraph-gaps-header  { color: #c2410c !important; }
+.ngraph-edge {
+    display: flex !important;
+    align-items: center !important;
+    gap: 6px !important;
+    padding: 5px 8px !important;
+    border-radius: 6px !important;
+    margin-bottom: 5px !important;
+    font-size: 12px !important;
+    background: #f9fafb !important;
+    border: 1px solid #e5e7eb !important;
+}
+.ngraph-edge .edge-src   { font-weight: 700 !important; color: #1d4ed8 !important; }
+.ngraph-edge .edge-tgt   { font-weight: 700 !important; color: #15803d !important; }
+.ngraph-edge .edge-arrow { color: #9ca3af !important; }
+.edge-weight {
+    margin-left: auto !important;
+    font-size: 10px !important;
+    font-weight: 700 !important;
+    padding: 1px 7px !important;
+    border-radius: 99px !important;
+    text-transform: uppercase !important;
+}
+.edge-weight.strong { background: #dcfce7 !important; color: #166534 !important; }
+.edge-weight.weak   { background: #fef9c3 !important; color: #854d0e !important; }
+.ngraph-gap-row {
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+    padding: 5px 8px !important;
+    border-radius: 6px !important;
+    margin-bottom: 5px !important;
+    font-size: 12px !important;
+    background: #fff7ed !important;
+    border: 1px solid #fed7aa !important;
+    color: #7c2d12 !important;
+}
+.ngraph-gap-row .gap-id { font-weight: 700 !important; color: #c2410c !important; }
 """
 
 # Shared, read-only, built once at process startup -- see the module
@@ -250,30 +379,15 @@ def _build_corpus_store() -> VectorStore:
     return store
 
 
-def _parse_llm_sections(text: str) -> dict[str, list[str] | str]:
-    """Parse the structured LLM output into its three sections.
-
-    Returns a dict with keys 'concepts', 'elements', 'relevance'.
-    Each of 'concepts' and 'elements' is a list of bullet strings;
-    'relevance' is a plain string. Any section that can't be found
-    gets an empty list / empty string so the template always has
-    something to check without raising KeyError.
-    """
+def _parse_llm_sections(text: str) -> dict:
+    """Parse MATCHING CONCEPTS, POTENTIAL SUPPORTED ELEMENTS, and RELEVANCE."""
     import re
-
-    sections: dict[str, list[str] | str] = {
-        "concepts": [],
-        "elements": [],
-        "relevance": "",
-    }
-
-    # Split on the three known section headers (case-insensitive).
+    sections: dict = {"concepts": [], "elements": [], "relevance": ""}
     pattern = re.compile(
         r"(MATCHING CONCEPTS:|POTENTIAL SUPPORTED ELEMENTS:|RELEVANCE:)",
         re.IGNORECASE,
     )
     parts = pattern.split(text)
-
     current = None
     for part in parts:
         upper = part.strip().upper()
@@ -295,60 +409,165 @@ def _parse_llm_sections(text: str) -> dict[str, list[str] | str]:
                 ln.lstrip("-•· ").strip()
                 for ln in part.strip().splitlines()
                 if ln.strip() and not ln.strip().upper().startswith("RELEVANCE")
+                    and not ln.strip().upper().startswith("NOVELTY")
             ]
             sections["elements"] = [b for b in bullets if b]
         elif current == "relevance":
-            sections["relevance"] = part.strip()
-
+            # Stop at the NOVELTY GAP GRAPH heading
+            chunk = re.split(r"NOVELTY GAP GRAPH", part, flags=re.IGNORECASE)[0]
+            sections["relevance"] = chunk.strip()
     return sections
 
 
-def _render_llm_panel(llm_text: str) -> str:
-    """Render the structured LLM analysis as a three-section HTML panel."""
-    parsed = _parse_llm_sections(llm_text)
-    concepts: list[str] = parsed["concepts"]  # type: ignore[assignment]
-    elements: list[str] = parsed["elements"]  # type: ignore[assignment]
-    relevance: str = parsed["relevance"]  # type: ignore[assignment]
+def _render_graph_html(llm_text: str) -> str:
+    """Render the Novelty Gap Graph as a structured HTML bipartite layout."""
+    g = parse_novelty_graph(llm_text)
+    if not g["claims"] and not g["evidence"] and not g["edges"]:
+        return ""
 
-    def bullet_items(items: list[str], css_class: str) -> str:
-        if not items:
-            return f'<li class="none">None identified</li>'
-        return "".join(
-            f"<li>{html.escape(item)}</li>" for item in items
+    gap_ids = set(g["gaps"])
+
+    # ── Claim column ──────────────────────────────────────────
+    claim_items = []
+    for cid, label in g["claims"].items():
+        css = "gap-node" if cid in gap_ids else "claim-node"
+        gap_badge = " ⚠ no evidence" if cid in gap_ids else ""
+        claim_items.append(
+            f'<div class="ngraph-node {css}">'
+            f'<span class="node-id">{html.escape(cid)}</span>'
+            f'{html.escape(label)}{html.escape(gap_badge)}'
+            f"</div>"
         )
+
+    # ── Evidence column ───────────────────────────────────────
+    evidence_items = []
+    for eid, label in g["evidence"].items():
+        evidence_items.append(
+            f'<div class="ngraph-node evidence-node">'
+            f'<span class="node-id">{html.escape(eid)}</span>'
+            f'{html.escape(label)}'
+            f"</div>"
+        )
+
+    columns_html = (
+        f'<div class="ngraph-columns">'
+        f'<div>'
+        f'<div class="ngraph-col-header claim-header">🔵 Claim elements</div>'
+        f'{"".join(claim_items) or "<em>None</em>"}'
+        f"</div>"
+        f'<div>'
+        f'<div class="ngraph-col-header evidence-header">🟢 Evidence passages</div>'
+        f'{"".join(evidence_items) or "<em>None</em>"}'
+        f"</div>"
+        f"</div>"
+    )
+
+    # ── Edges ─────────────────────────────────────────────────
+    edge_rows = []
+    for src, tgt, weight in g["edges"]:
+        w_class = "strong" if weight == "strong" else "weak"
+        src_label = html.escape(g["claims"].get(src, src))
+        tgt_label = html.escape(g["evidence"].get(tgt, tgt))
+        edge_rows.append(
+            f'<div class="ngraph-edge" title="{src_label} → {tgt_label}">'
+            f'<span class="edge-src">{html.escape(src)}</span>'
+            f'<span class="edge-arrow">→</span>'
+            f'<span class="edge-tgt">{html.escape(tgt)}</span>'
+            f'<span class="edge-weight {w_class}">{html.escape(weight)}</span>'
+            f"</div>"
+        )
+
+    edges_html = ""
+    if edge_rows:
+        edges_html = (
+            f'<div class="ngraph-edges-header">⟶ Support edges</div>'
+            + "".join(edge_rows)
+        )
+
+    # ── Gaps ──────────────────────────────────────────────────
+    gap_rows = []
+    for cid in g["gaps"]:
+        label = html.escape(g["claims"].get(cid, ""))
+        gap_rows.append(
+            f'<div class="ngraph-gap-row">'
+            f'<span class="gap-id">{html.escape(cid)}</span>'
+            f"⚠ No supporting evidence found"
+            f'{" — " + label if label else ""}'
+            f"</div>"
+        )
+
+    gaps_html = ""
+    if gap_rows:
+        gaps_html = (
+            f'<div class="ngraph-gaps-header">⚠ Novelty gaps (no evidence)</div>'
+            + "".join(gap_rows)
+        )
+
+    return (
+        f'<details class="graph-details">'
+        f'<summary>'
+        f'📊 Novelty Gap Graph'
+        f'<span class="summary-chevron">▼</span>'
+        f"</summary>"
+        f'<div class="graph-details-body">'
+        f"{columns_html}{edges_html}{gaps_html}"
+        f"</div>"
+        f"</details>"
+    )
+
+
+def _render_llm_panel(llm_text: str) -> str:
+    """Render AI Prior-Art Analysis as a collapsible <details> block,
+    followed by a separate collapsible Novelty Gap Graph block."""
+    parsed = _parse_llm_sections(llm_text)
+    concepts: list = parsed["concepts"]
+    elements: list = parsed["elements"]
+    relevance: str = parsed["relevance"]
+
+    def bullet_items(items: list, list_class: str = "") -> str:
+        if not items:
+            return '<li style="color:#9ca3af;font-style:italic">None identified</li>'
+        return "".join(f"<li>{html.escape(item)}</li>" for item in items)
 
     concepts_html = (
         f'<div class="llm-section">'
-        f'<div class="llm-section-label concepts">'
+        f'<div class="llm-section-label">'
         f'<span class="llm-tag concepts">Matching Concepts</span></div>'
-        f'<ul class="llm-bullet-list">{bullet_items(concepts, "concepts")}</ul>'
+        f'<ul class="llm-bullet-list">{bullet_items(concepts)}</ul>'
         f"</div>"
     )
-
     elements_html = (
         f'<div class="llm-section">'
-        f'<div class="llm-section-label elements">'
+        f'<div class="llm-section-label">'
         f'<span class="llm-tag elements">Potential Supported Elements</span></div>'
-        f'<ul class="llm-bullet-list elements">{bullet_items(elements, "elements")}</ul>'
+        f'<ul class="llm-bullet-list elements">{bullet_items(elements)}</ul>'
         f"</div>"
     )
-
     relevance_html = ""
     if relevance:
         relevance_html = (
             f'<div class="llm-section">'
-            f'<div class="llm-section-label relevance">'
+            f'<div class="llm-section-label">'
             f'<span class="llm-tag relevance">Relevance</span></div>'
             f'<p class="llm-relevance-text">{html.escape(relevance)}</p>'
             f"</div>"
         )
 
-    return (
-        f'<div class="llm-panel">'
-        f'<div class="llm-panel-header">&#129302; AI Prior-Art Analysis</div>'
+    analysis_block = (
+        f'<details class="llm-details">'
+        f"<summary>"
+        f"🤖 AI Prior-Art Analysis"
+        f'<span class="summary-chevron">▼</span>'
+        f"</summary>"
+        f'<div class="llm-details-body">'
         f"{concepts_html}{elements_html}{relevance_html}"
         f"</div>"
+        f"</details>"
     )
+
+    graph_block = _render_graph_html(llm_text)
+
+    return analysis_block + graph_block
 
 
 def render_card(result, query: str) -> str:
@@ -362,13 +581,11 @@ def render_card(result, query: str) -> str:
     domain = html.escape(chunk.domain)
     doc_id = html.escape(chunk.doc_id)
 
-    if chunk.url:
-        id_html = (
-            f'<a href="{html.escape(chunk.url)}" target="_blank"'
-            f' rel="noreferrer noopener">{doc_id} ↗</a>'
-        )
-    else:
-        id_html = doc_id
+    id_html = (
+        f'<a href="{html.escape(chunk.url)}" target="_blank"'
+        f' rel="noreferrer noopener">{doc_id} ↗</a>'
+        if chunk.url else doc_id
+    )
 
     llm_block = _render_llm_panel(llm_text) if llm_text else ""
 
