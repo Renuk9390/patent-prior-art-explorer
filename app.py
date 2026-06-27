@@ -419,98 +419,208 @@ def _parse_llm_sections(text: str) -> dict:
     return sections
 
 
-def _render_graph_html(llm_text: str) -> str:
-    """Render the Novelty Gap Graph as a structured HTML bipartite layout."""
-    g = parse_novelty_graph(llm_text)
-    if not g["claims"] and not g["evidence"] and not g["edges"]:
+def _build_graph_svg(g: dict) -> str:
+    """Render the Novelty Gap Graph as an inline SVG bipartite diagram.
+
+    Left column  = CLAIM nodes  (from search query)   — blue / orange if gap
+    Right column = EVIDENCE nodes (from retrieved passage) — green
+    Lines between them show support edges, colour/dash-coded by strength.
+    """
+    claims   = g["claims"]    # {id: label}
+    evidence = g["evidence"]  # {id: label}
+    edges    = g["edges"]     # [(src, tgt, weight)]
+    gap_set  = set(g["gaps"])
+
+    if not claims and not evidence:
         return ""
 
-    gap_ids = set(g["gaps"])
+    # ── Layout constants ──────────────────────────────────────────────
+    SVG_W     = 680
+    NODE_W    = 190
+    NODE_H    = 56
+    CLAIM_CX  = 115          # centre-x of all claim nodes
+    EVID_CX   = SVG_W - 115  # centre-x of all evidence nodes
+    ROW_H     = 74
+    TOP_PAD   = 44           # space for column headers
 
-    # ── Claim column ──────────────────────────────────────────
-    claim_items = []
-    for cid, label in g["claims"].items():
-        css = "gap-node" if cid in gap_ids else "claim-node"
-        gap_badge = " ⚠ no evidence" if cid in gap_ids else ""
-        claim_items.append(
-            f'<div class="ngraph-node {css}">'
-            f'<span class="node-id">{html.escape(cid)}</span>'
-            f'{html.escape(label)}{html.escape(gap_badge)}'
-            f"</div>"
-        )
+    n_rows = max(len(claims), len(evidence), 1)
+    SVG_H  = TOP_PAD + n_rows * ROW_H + 20
 
-    # ── Evidence column ───────────────────────────────────────
-    evidence_items = []
-    for eid, label in g["evidence"].items():
-        evidence_items.append(
-            f'<div class="ngraph-node evidence-node">'
-            f'<span class="node-id">{html.escape(eid)}</span>'
-            f'{html.escape(label)}'
-            f"</div>"
-        )
+    def node_cy(idx: int, total: int) -> float:
+        """Vertically centre nodes evenly within the canvas."""
+        usable = SVG_H - TOP_PAD - 20
+        spacing = usable / max(total, 1)
+        return TOP_PAD + idx * spacing + spacing / 2
 
-    columns_html = (
-        f'<div class="ngraph-columns">'
-        f'<div>'
-        f'<div class="ngraph-col-header claim-header">🔵 Claim elements</div>'
-        f'{"".join(claim_items) or "<em>None</em>"}'
-        f"</div>"
-        f'<div>'
-        f'<div class="ngraph-col-header evidence-header">🟢 Evidence passages</div>'
-        f'{"".join(evidence_items) or "<em>None</em>"}'
-        f"</div>"
-        f"</div>"
+    claim_list    = list(claims.items())
+    evidence_list = list(evidence.items())
+
+    claim_y  = {cid: node_cy(i, len(claim_list))    for i, (cid, _) in enumerate(claim_list)}
+    evid_y   = {eid: node_cy(i, len(evidence_list)) for i, (eid, _) in enumerate(evidence_list)}
+
+    parts: list[str] = []
+
+    # ── Column header labels ──────────────────────────────────────────
+    parts.append(
+        f'<text x="{CLAIM_CX}" y="22" text-anchor="middle" '
+        f'font-size="11" font-weight="bold" fill="#1d4ed8" font-family="sans-serif">'
+        f'SEARCH QUERY ELEMENTS</text>'
+    )
+    parts.append(
+        f'<text x="{EVID_CX}" y="22" text-anchor="middle" '
+        f'font-size="11" font-weight="bold" fill="#15803d" font-family="sans-serif">'
+        f'PRIOR ART EVIDENCE</text>'
     )
 
-    # ── Edges ─────────────────────────────────────────────────
-    edge_rows = []
-    for src, tgt, weight in g["edges"]:
-        w_class = "strong" if weight == "strong" else "weak"
-        src_label = html.escape(g["claims"].get(src, src))
-        tgt_label = html.escape(g["evidence"].get(tgt, tgt))
-        edge_rows.append(
-            f'<div class="ngraph-edge" title="{src_label} → {tgt_label}">'
-            f'<span class="edge-src">{html.escape(src)}</span>'
-            f'<span class="edge-arrow">→</span>'
-            f'<span class="edge-tgt">{html.escape(tgt)}</span>'
-            f'<span class="edge-weight {w_class}">{html.escape(weight)}</span>'
-            f"</div>"
+    # ── Edges (drawn first so nodes sit on top) ───────────────────────
+    for src, tgt, weight in edges:
+        if src not in claim_y or tgt not in evid_y:
+            continue
+        x1 = CLAIM_CX + NODE_W / 2
+        x2 = EVID_CX  - NODE_W / 2
+        y1 = claim_y[src]
+        y2 = evid_y[tgt]
+        color  = "#16a34a" if weight == "strong" else "#d97706"
+        sw     = "2.5"     if weight == "strong" else "1.5"
+        dash   = ""        if weight == "strong" else 'stroke-dasharray="6,3"'
+        # mid-point control for a slight curve
+        mx = (x1 + x2) / 2
+        parts.append(
+            f'<path d="M{x1},{y1} C{mx},{y1} {mx},{y2} {x2},{y2}" '
+            f'fill="none" stroke="{color}" stroke-width="{sw}" {dash} opacity="0.75"/>'
+        )
+        # weight label at midpoint
+        lx, ly = mx, (y1 + y2) / 2 - 5
+        parts.append(
+            f'<rect x="{lx-22}" y="{ly-8}" width="44" height="16" rx="4" '
+            f'fill="white" opacity="0.85"/>'
+        )
+        parts.append(
+            f'<text x="{lx}" y="{ly+4}" text-anchor="middle" font-size="9" '
+            f'font-weight="bold" fill="{color}" font-family="sans-serif">'
+            f'{html.escape(weight.upper())}</text>'
         )
 
-    edges_html = ""
-    if edge_rows:
-        edges_html = (
-            f'<div class="ngraph-edges-header">⟶ Support edges</div>'
-            + "".join(edge_rows)
-        )
+    def wrap_label(label: str, max_chars: int = 24) -> tuple[str, str]:
+        """Split a label into up to two display lines."""
+        if len(label) <= max_chars:
+            return label, ""
+        # try to split at a space near the midpoint
+        mid = max_chars
+        split_at = label.rfind(" ", 0, mid)
+        if split_at == -1:
+            split_at = mid
+        line1 = label[:split_at].strip()
+        line2 = label[split_at:].strip()
+        if len(line2) > max_chars:
+            line2 = line2[:max_chars - 1] + "…"
+        return line1, line2
 
-    # ── Gaps ──────────────────────────────────────────────────
-    gap_rows = []
-    for cid in g["gaps"]:
-        label = html.escape(g["claims"].get(cid, ""))
-        gap_rows.append(
+    def draw_node(cx: float, cy: float, node_id: str, label: str,
+                  fill: str, stroke: str, id_color: str, label_color: str,
+                  sub: str = "") -> None:
+        x = cx - NODE_W / 2
+        y = cy - NODE_H / 2
+        # drop-shadow filter reference (defined once in <defs>)
+        parts.append(
+            f'<rect x="{x:.1f}" y="{y:.1f}" width="{NODE_W}" height="{NODE_H}" '
+            f'rx="9" fill="{fill}" stroke="{stroke}" stroke-width="1.5" '
+            f'filter="url(#shadow)"/>'
+        )
+        line1, line2 = wrap_label(label)
+        # node ID
+        parts.append(
+            f'<text x="{cx}" y="{cy - 12}" text-anchor="middle" '
+            f'font-size="12" font-weight="bold" fill="{id_color}" font-family="sans-serif">'
+            f'{html.escape(node_id)}</text>'
+        )
+        # label line 1
+        parts.append(
+            f'<text x="{cx}" y="{cy + 5}" text-anchor="middle" '
+            f'font-size="9.5" fill="{label_color}" font-family="sans-serif">'
+            f'{html.escape(line1)}</text>'
+        )
+        if line2:
+            parts.append(
+                f'<text x="{cx}" y="{cy + 18}" text-anchor="middle" '
+                f'font-size="9.5" fill="{label_color}" font-family="sans-serif">'
+                f'{html.escape(line2)}</text>'
+            )
+        if sub:
+            parts.append(
+                f'<text x="{cx}" y="{cy + (28 if line2 else 20)}" '
+                f'text-anchor="middle" font-size="8.5" fill="#f97316" '
+                f'font-family="sans-serif">{html.escape(sub)}</text>'
+            )
+
+    # ── Claim nodes ───────────────────────────────────────────────────
+    for cid, label in claim_list:
+        cy = claim_y[cid]
+        if cid in gap_set:
+            draw_node(CLAIM_CX, cy, cid, label,
+                      fill="#fff7ed", stroke="#f97316",
+                      id_color="#c2410c", label_color="#7c2d12",
+                      sub="⚠ no evidence")
+        else:
+            draw_node(CLAIM_CX, cy, cid, label,
+                      fill="#eff6ff", stroke="#3b82f6",
+                      id_color="#1d4ed8", label_color="#1e3a5f")
+
+    # ── Evidence nodes ────────────────────────────────────────────────
+    for eid, label in evidence_list:
+        cy = evid_y[eid]
+        draw_node(EVID_CX, cy, eid, label,
+                  fill="#f0fdf4", stroke="#22c55e",
+                  id_color="#15803d", label_color="#14532d")
+
+    defs = (
+        '<defs>'
+        '<filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">'
+        '<feDropShadow dx="0" dy="1" stdDeviation="2" flood-color="#00000018"/>'
+        '</filter>'
+        '</defs>'
+    )
+
+    return (
+        f'<svg viewBox="0 0 {SVG_W} {SVG_H}" xmlns="http://www.w3.org/2000/svg" '
+        f'style="width:100%;max-width:{SVG_W}px;display:block">'
+        + defs
+        + "\n".join(parts)
+        + "</svg>"
+    )
+
+
+def _render_graph_html(llm_text: str) -> str:
+    """Wrap the SVG bipartite graph inside a collapsible <details> block."""
+    g = parse_novelty_graph(llm_text)
+    if not g["claims"] and not g["evidence"]:
+        return ""
+
+    svg = _build_graph_svg(g)
+
+    # Gaps summary below the SVG (text row for accessibility)
+    gap_rows = ""
+    if g["gaps"]:
+        rows = "".join(
             f'<div class="ngraph-gap-row">'
             f'<span class="gap-id">{html.escape(cid)}</span>'
-            f"⚠ No supporting evidence found"
-            f'{" — " + label if label else ""}'
+            f'⚠ No supporting evidence — '
+            f'{html.escape(g["claims"].get(cid, ""))}'
             f"</div>"
+            for cid in g["gaps"]
         )
-
-    gaps_html = ""
-    if gap_rows:
-        gaps_html = (
-            f'<div class="ngraph-gaps-header">⚠ Novelty gaps (no evidence)</div>'
-            + "".join(gap_rows)
+        gap_rows = (
+            f'<div class="ngraph-gaps-header">⚠ Novelty gaps</div>{rows}'
         )
 
     return (
         f'<details class="graph-details">'
-        f'<summary>'
-        f'📊 Novelty Gap Graph'
+        f"<summary>"
+        f"📊 Novelty Gap Graph"
         f'<span class="summary-chevron">▼</span>'
         f"</summary>"
         f'<div class="graph-details-body">'
-        f"{columns_html}{edges_html}{gaps_html}"
+        f"{svg}{gap_rows}"
         f"</div>"
         f"</details>"
     )
