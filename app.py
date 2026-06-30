@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import html
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import gradio as gr
 
@@ -340,6 +341,31 @@ CUSTOM_CSS = """
     color: #7c2d12 !important;
 }
 .ngraph-gap-row .gap-id { font-weight: 700 !important; color: #c2410c !important; }
+
+/* ── pending AI analysis placeholder ───────────────────────── */
+.llm-pending {
+    margin-top: 12px !important;
+    padding: 10px 14px !important;
+    border-radius: 10px !important;
+    background: #f8fafc !important;
+    border: 1px dashed #cbd5e1 !important;
+    font-size: 12px !important;
+    color: #6b7280 !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+}
+.llm-pending-spinner {
+    display: inline-block !important;
+    animation: llm-pending-pulse 1.4s ease-in-out infinite !important;
+}
+@keyframes llm-pending-pulse {
+    0%, 100% { opacity: 0.35; }
+    50%      { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .llm-pending-spinner { animation: none !important; }
+}
 """
 
 # Shared, read-only, built once at process startup -- see the module
@@ -680,11 +706,25 @@ def _render_llm_panel(llm_text: str) -> str:
     return analysis_block + graph_block
 
 
-def render_card(result, query: str) -> str:
+_PENDING_PLACEHOLDER = (
+    '<div class="llm-pending">'
+    '<span class="llm-pending-spinner">⏳</span>'
+    " Generating AI prior-art analysis &amp; novelty gap graph"
+    "&hellip; results above are already final."
+    "</div>"
+)
+
+
+def _card_shell(result, query: str):
+    """Compute the fast, local part of a result card (no network calls).
+
+    Returns (header_and_snippet_html, explanation_dict) -- the snippet
+    HTML already has highlighting applied via the local embedding model,
+    which is fast (no LLM call involved).
+    """
     chunk = result.chunk
     explanation = explain_match(query, chunk.text, top_n=2)
     snippet_html = highlight_html(chunk.text, explanation["highlighted"])
-    llm_text = llm_explain(query, chunk.text, explanation["highlighted"])
 
     score_pct = f"{result.score * 100:.1f}%"
     title = html.escape(chunk.doc_title)
@@ -697,10 +737,7 @@ def render_card(result, query: str) -> str:
         if chunk.url else doc_id
     )
 
-    llm_block = _render_llm_panel(llm_text) if llm_text else ""
-
-    return (
-        f'<div class="result-card">'
+    header_and_snippet = (
         f'<div class="result-header">'
         f'<span class="result-domain">{domain}</span>'
         f'<span class="result-score">match {score_pct}</span>'
@@ -708,9 +745,40 @@ def render_card(result, query: str) -> str:
         f'<h3 class="result-title">{title}'
         f' <span class="result-id">({id_html})</span></h3>'
         f'<p class="result-snippet">{snippet_html}</p>'
+    )
+    return header_and_snippet, explanation
+
+
+def render_card_pending(result, query: str) -> str:
+    """Render a card with its fast parts done and AI analysis still pending."""
+    header_and_snippet, _ = _card_shell(result, query)
+    return (
+        f'<div class="result-card">'
+        f"{header_and_snippet}"
+        f"{_PENDING_PLACEHOLDER}"
+        f"</div>"
+    )
+
+
+def render_card_with_llm(result, query: str, llm_text: str | None) -> str:
+    """Render a card with its fast parts plus a completed (or absent) AI analysis."""
+    header_and_snippet, _ = _card_shell(result, query)
+    llm_block = _render_llm_panel(llm_text) if llm_text else ""
+    return (
+        f'<div class="result-card">'
+        f"{header_and_snippet}"
         f"{llm_block}"
         f"</div>"
     )
+
+
+def render_card(result, query: str) -> str:
+    """Render a fully-resolved card synchronously (used outside the
+    streaming search path, e.g. for quick manual testing)."""
+    chunk = result.chunk
+    explanation = explain_match(query, chunk.text, top_n=2)
+    llm_text = llm_explain(query, chunk.text, explanation["highlighted"])
+    return render_card_with_llm(result, query, llm_text)
 
 
 def on_upload(file_path: str | None):
@@ -756,9 +824,25 @@ def on_upload(file_path: str | None):
 
 
 def do_search(query: str, uploaded_store):
+    """Generator: yields fast results first, then streams in AI analysis.
+
+    Phase 1 (fast, local-only): retrieval + embedding-based highlighting.
+    Typically well under a second once the model is warm. Yielded
+    immediately so the visitor sees results right away.
+
+    Phase 2 (slow, network calls): one Groq LLM call per result card for
+    the structured prior-art analysis + novelty gap graph. These five
+    calls are independent of each other, so they're run concurrently in
+    a thread pool rather than one after another -- this is what cuts
+    the background wait from roughly 5x a single call's latency down to
+    close to just one call's latency. As each card's analysis finishes,
+    an updated HTML snapshot is yielded so the page fills in
+    progressively rather than waiting for every card to finish at once.
+    """
     query = (query or "").strip()
     if not query:
-        return "<p style='color:#6b7280;'>Type a search query above, then press Search.</p>"
+        yield "<p style='color:#6b7280;'>Type a search query above, then press Search.</p>"
+        return
 
     query_vec = embed_query(query)
     corpus_store = get_corpus_store()
@@ -770,9 +854,38 @@ def do_search(query: str, uploaded_store):
     results = results[:TOP_K]
 
     if not results:
-        return "<p style='color:#6b7280;'>No results found.</p>"
+        yield "<p style='color:#6b7280;'>No results found.</p>"
+        return
 
-    return "\n".join(render_card(r, query) for r in results)
+    # ── Phase 1: fast, local-only rendering ─────────────────────────
+    pending_cards = [render_card_pending(r, query) for r in results]
+    yield "\n".join(pending_cards)
+
+    # ── Phase 2: parallel LLM calls, streamed in as they complete ───
+    llm_texts: list[str | None] = [None] * len(results)
+    done: list[bool] = [False] * len(results)
+
+    def fetch_llm(index: int, result):
+        chunk = result.chunk
+        explanation = explain_match(query, chunk.text, top_n=2)
+        return index, llm_explain(query, chunk.text, explanation["highlighted"])
+
+    with ThreadPoolExecutor(max_workers=max(len(results), 1)) as pool:
+        futures = [
+            pool.submit(fetch_llm, i, r) for i, r in enumerate(results)
+        ]
+        for future in as_completed(futures):
+            index, llm_text = future.result()
+            llm_texts[index] = llm_text
+            done[index] = True
+
+            cards = [
+                render_card_with_llm(results[i], query, llm_texts[i])
+                if done[i]
+                else pending_cards[i]
+                for i in range(len(results))
+            ]
+            yield "\n".join(cards)
 
 
 def build_app() -> gr.Blocks:
