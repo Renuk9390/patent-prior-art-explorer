@@ -32,10 +32,15 @@ from .embeddings import embed_passages, embed_query
 _GROQ_MODELS = [
     m for m in (
         os.environ.get("GROQ_MODEL"),
-        "llama-3.1-8b-instant",
-        "llama-3.3-70b-versatile",
+        "openai/gpt-oss-20b",    # Groq's recommended replacement for llama-3.1-8b-instant
+        "openai/gpt-oss-120b",   # larger fallback
     ) if m
 ]
+
+# Model-name fragments that are NOT general chat/text models; skipped
+# during automatic discovery.
+_NON_CHAT_HINTS = ("whisper", "guard", "safeguard", "tts", "orpheus",
+                   "playai", "embed", "vision-preview", "distil")
 # Last failure reason, surfaced in the UI so a silent outage is visible.
 LAST_LLM_ERROR: str | None = None
 _GROQ_TIMEOUT_SECONDS = 20
@@ -158,22 +163,62 @@ def llm_explain(query: str, chunk_text: str, highlighted: list[str]) -> str | No
 
         global LAST_LLM_ERROR
         last_exc = None
-        for model_name in _GROQ_MODELS:
+        tried: set[str] = set()
+
+        def attempt(model_name: str):
+            """One call; reasoning models get a low effort + larger budget so
+            hidden reasoning tokens don't consume the whole answer."""
+            kwargs = dict(
+                model=model_name,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=1500,
+                temperature=0.2,
+            )
+            if "gpt-oss" in model_name:
+                kwargs["extra_body"] = {"reasoning_effort": "low"}
+            response = client.chat.completions.create(**kwargs)
+            text = response.choices[0].message.content
+            return text.strip() if text else None
+
+        def try_models(names):
+            nonlocal last_exc
+            for model_name in names:
+                if model_name in tried:
+                    continue
+                tried.add(model_name)
+                try:
+                    result = attempt(model_name)
+                    if result:
+                        return result
+                    print(f"[llm_explain] model={model_name} returned empty text", flush=True)
+                except Exception as exc:
+                    last_exc = exc
+                    print(f"[llm_explain] model={model_name} failed: "
+                          f"{type(exc).__name__}: {exc}", flush=True)
+            return None
+
+        result = try_models(_GROQ_MODELS)
+        if result is None:
+            # Self-healing: Groq retires models regularly. Ask the API which
+            # models this key can actually use and try those instead.
             try:
-                response = client.chat.completions.create(
-                    model=model_name,
-                    messages=[{"role": "user", "content": prompt}],
-                    max_tokens=700,
-                    temperature=0.2,
-                )
-                text = response.choices[0].message.content
-                LAST_LLM_ERROR = None
-                return text.strip() if text else None
-            except Exception as exc:  # try the next model
-                last_exc = exc
-                print(f"[llm_explain] model={model_name} failed: "
+                available = [m.id for m in client.models.list().data]
+                print(f"[llm_explain] models available to this key: {available}", flush=True)
+                candidates = [
+                    m for m in available
+                    if not any(h in m.lower() for h in _NON_CHAT_HINTS)
+                ]
+                candidates.sort(key=lambda m: (0 if "gpt-oss" in m else 1, m))
+                result = try_models(candidates[:3])
+            except Exception as exc:
+                last_exc = last_exc or exc
+                print(f"[llm_explain] model discovery failed: "
                       f"{type(exc).__name__}: {exc}", flush=True)
-        LAST_LLM_ERROR = f"{type(last_exc).__name__}: {last_exc}"
+
+        if result:
+            LAST_LLM_ERROR = None
+            return result
+        LAST_LLM_ERROR = f"{type(last_exc).__name__}: {last_exc}" if last_exc else "empty response"
         return None
     except Exception as exc:
         LAST_LLM_ERROR = f"{type(exc).__name__}: {exc}"
