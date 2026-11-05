@@ -94,3 +94,12 @@ release.
 See `README.md` in this folder for local development and Hugging Face
 Space deployment instructions, including how to (optionally) configure
 the `GROQ_API_KEY` secret for the LLM explanation layer.
+
+## New changes made on November 2026
+Your Groq models were retired. Groq shut down both llama-3.1-8b-instant and llama-3.3-70b-versatile on 16 August 2026, which matches the model_not_found errors in your log. Your API key and the app code were fine. That’s why the AI analysis stopped working a few weeks ago.
+
+Groq’s official replacements are openai/gpt-oss-20b (the fast one) and openai/gpt-oss-120b. I changed explain.py in three ways:
+
+New models: it now uses openai/gpt-oss-20b first, then openai/gpt-oss-120b.
+Reasoning settings: these models do hidden “thinking” that uses up tokens, so I set reasoning effort to low and raised the token limit from 700 to 1500. Otherwise the answer could be cut off or come back empty.
+Self-healing: if both models ever fail, the code asks Groq which models your key can use and tries those. This keeps the demo from breaking again the next time Groq retires a model.
