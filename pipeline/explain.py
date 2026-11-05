@@ -26,7 +26,18 @@ import re
 from .chunking import split_sentences
 from .embeddings import embed_passages, embed_query
 
-_GROQ_MODEL = "llama-3.1-8b-instant"
+# Primary model can be overridden without a code change by setting a
+# GROQ_MODEL variable in the Space settings. Fallbacks are tried in order
+# if the primary is retired or unavailable (Groq rotates models over time).
+_GROQ_MODELS = [
+    m for m in (
+        os.environ.get("GROQ_MODEL"),
+        "llama-3.1-8b-instant",
+        "llama-3.3-70b-versatile",
+    ) if m
+]
+# Last failure reason, surfaced in the UI so a silent outage is visible.
+LAST_LLM_ERROR: str | None = None
 _GROQ_TIMEOUT_SECONDS = 20
 
 
@@ -63,6 +74,7 @@ def llm_explain(query: str, chunk_text: str, highlighted: list[str]) -> str | No
     """
     api_key = os.environ.get("GROQ_API_KEY")
     if not api_key:
+        print("[llm_explain] GROQ_API_KEY is not set -- skipping AI analysis.", flush=True)
         return None
 
     try:
@@ -144,15 +156,28 @@ def llm_explain(query: str, chunk_text: str, highlighted: list[str]) -> str | No
             f"Retrieved Prior-Art Passage:\n{evidence}\n"
         )
 
-        response = client.chat.completions.create(
-            model=_GROQ_MODEL,
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=700,
-            temperature=0.2,
-        )
-        text = response.choices[0].message.content
-        return text.strip() if text else None
-    except Exception:
+        global LAST_LLM_ERROR
+        last_exc = None
+        for model_name in _GROQ_MODELS:
+            try:
+                response = client.chat.completions.create(
+                    model=model_name,
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=700,
+                    temperature=0.2,
+                )
+                text = response.choices[0].message.content
+                LAST_LLM_ERROR = None
+                return text.strip() if text else None
+            except Exception as exc:  # try the next model
+                last_exc = exc
+                print(f"[llm_explain] model={model_name} failed: "
+                      f"{type(exc).__name__}: {exc}", flush=True)
+        LAST_LLM_ERROR = f"{type(last_exc).__name__}: {last_exc}"
+        return None
+    except Exception as exc:
+        LAST_LLM_ERROR = f"{type(exc).__name__}: {exc}"
+        print(f"[llm_explain] unexpected failure: {LAST_LLM_ERROR}", flush=True)
         return None
 
 
@@ -242,4 +267,3 @@ def highlight_html(chunk_text: str, highlighted: list[str]) -> str:
                 escaped_sentence, f"<mark>{escaped_sentence}</mark>"
             )
     return escaped
-

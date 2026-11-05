@@ -38,6 +38,7 @@ import gradio as gr
 from corpus import CORPUS
 from pipeline.chunking import chunk_text, extract_pdf_text
 from pipeline.embeddings import embed_passages, embed_query
+from pipeline import explain as _explain_mod
 from pipeline.explain import explain_match, highlight_html, llm_explain, parse_novelty_graph
 from pipeline.vectorstore import Chunk, VectorStore
 
@@ -763,7 +764,16 @@ def render_card_pending(result, query: str) -> str:
 def render_card_with_llm(result, query: str, llm_text: str | None) -> str:
     """Render a card with its fast parts plus a completed (or absent) AI analysis."""
     header_and_snippet, _ = _card_shell(result, query)
-    llm_block = _render_llm_panel(llm_text) if llm_text else ""
+    if llm_text:
+        llm_block = _render_llm_panel(llm_text)
+    else:
+        reason = "no GROQ_API_KEY is configured" if not os.environ.get("GROQ_API_KEY") \
+            else "the AI service did not respond (see Space logs)"
+        llm_block = (
+            '<div class="llm-pending">&#9888;&#65039; AI analysis &amp; novelty '
+            f"graph unavailable right now &mdash; {html.escape(reason)}. "
+            "The retrieval results above are unaffected.</div>"
+        )
     return (
         f'<div class="result-card">'
         f"{header_and_snippet}"
@@ -894,7 +904,7 @@ def build_app() -> gr.Blocks:
     # cold model load.
     get_corpus_store()
 
-    with gr.Blocks(css=CUSTOM_CSS, title="Patent Prior-Art Explorer") as demo:
+    with gr.Blocks(title="Patent Prior-Art Explorer") as demo:
         uploaded_store_state = gr.State(None)
 
         gr.Markdown(
@@ -968,4 +978,4 @@ def build_app() -> gr.Blocks:
 
 if __name__ == "__main__":
     app = build_app()
-    app.launch()
+    app.launch(css=CUSTOM_CSS)
