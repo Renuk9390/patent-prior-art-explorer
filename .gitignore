@@ -16,7 +16,7 @@ venv/
 .ipynb_checkpoints/
 
 # Local data, indexes and secrets (large files live in the HF Dataset repo)
-data/
-artifacts/
+/data/
+/artifacts/
 *.faiss
 .env

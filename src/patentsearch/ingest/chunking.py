@@ -2,7 +2,7 @@
 Text chunking utilities.
 
 Two chunking paths feed the same downstream pipeline:
-  - The curated demo corpus (corpus/patents.py) is already split into
+  - The curated demo corpus (patentsearch/data/demo_corpus.py) is already split into
     short, hand-picked paragraphs, so each paragraph is used as a chunk
     directly -- no further splitting needed.
   - User-uploaded PDFs are raw, unstructured text, so `chunk_text()`

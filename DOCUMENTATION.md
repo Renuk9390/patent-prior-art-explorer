@@ -21,16 +21,22 @@ documents → chunking → embeddings → FAISS vector store → query
     → (optional) LLM plain-language explanation → results
 ```
 
-Each stage is its own module under `pipeline/`, so any one piece can
-be swapped or upgraded later without touching the others:
+Each stage is its own module inside the `patentsearch` package under
+`src/`, so any one piece can be swapped or upgraded later without
+touching the others:
 
 | Stage | File | What it does |
 |---|---|---|
-| Chunking | `pipeline/chunking.py` | Splits text into retrievable passages. The curated corpus is pre-chunked by hand (`corpus/patents.py`); uploaded PDFs are chunked automatically with a lightweight, dependency-free sentence-grouping algorithm. |
-| Embeddings | `pipeline/embeddings.py` | Wraps `BAAI/bge-small-en-v1.5`, a small, free, CPU-friendly embedding model. Applies the correct asymmetric query-instruction prefix that BGE models expect. |
-| Vector store | `pipeline/vectorstore.py` | A thin wrapper around FAISS's `IndexFlatIP` (exact cosine similarity search), plus the chunk metadata needed to display a result. |
-| Explainability | `pipeline/explain.py` | Two layers: a fully local, deterministic sentence-level similarity scorer (always runs), and an optional LLM-generated plain-language explanation (only if configured, fails silently if unavailable). |
-| App | `app.py` | Gradio UI gluing the above together. |
+| Data types | `src/patentsearch/core/types.py` | The `Chunk` and `SearchResult` types shared by every stage. |
+| Demo corpus | `src/patentsearch/data/demo_corpus.py` | The curated, hand-chunked set of real patents. |
+| Chunking | `src/patentsearch/ingest/chunking.py` | Splits text into retrievable passages. Uploaded PDFs are chunked automatically with a lightweight, dependency-free sentence-grouping algorithm. |
+| Embeddings | `src/patentsearch/embedders/sentence_transformer.py` | Wraps `BAAI/bge-small-en-v1.5`, a small, free, CPU-friendly embedding model. Applies the correct asymmetric query-instruction prefix that BGE models expect. |
+| Vector store | `src/patentsearch/stores/faiss_store.py` | A thin wrapper around FAISS's `IndexFlatIP` (exact cosine similarity search). |
+| Highlighting | `src/patentsearch/explain/highlight.py` | Fully local, deterministic sentence-level similarity scoring and highlighting (always runs). |
+| Novelty Gap Graph | `src/patentsearch/explain/novelty_graph.py` | Parses the graph section of the LLM's analysis into nodes and edges. |
+| LLM analysis | `src/patentsearch/llm/groq.py` | Optional structured prior-art analysis via a free Groq-hosted model; returns nothing instead of failing if unavailable. |
+| App | `apps/gradio_app.py` | Gradio UI gluing the above together. |
+| Entry point | `app.py` | Thin wrapper that HuggingFace Spaces runs; it makes `src/` importable and starts the UI. |
 
 ## Why these specific choices
 
@@ -54,7 +60,7 @@ the whole tool. By computing "why this matched" directly from sentence
 embeddings (the same model already loaded for retrieval), the
 explainability and highlighting features work offline, for free,
 indefinitely. The optional Groq-based plain-language layer
-(`pipeline/explain.py::llm_explain`) is wrapped in a broad
+(`src/patentsearch/llm/groq.py::llm_explain`) is wrapped in a broad
 `try/except` specifically so that if it's ever unavailable, the
 visitor sees a working demo with one fewer nice-to-have detail —
 never a broken page.
@@ -64,7 +70,7 @@ API calls.** Patent specifications are public-domain government
 disclosures, not subject to the copyright restrictions that apply to
 most web content — using real excerpts is both legitimate and
 necessary for this to function as a credible patent search demo.
-Curating ~6 diverse patents as static data (`corpus/patents.py`) avoids
+Curating ~6 diverse patents as static data (`src/patentsearch/data/demo_corpus.py`) avoids
 any runtime dependency on an external patent-office API, which keeps
 the demo simple and immune to that API ever changing or rate-limiting.
 
@@ -73,7 +79,7 @@ the demo simple and immune to that API ever changing or rate-limiting.
 Letting a visitor upload their own PDF and search it alongside the
 demo corpus makes the tool genuinely useful, not just a fixed showcase.
 This is implemented as a **per-session** FAISS index built fresh from
-the uploaded file (`app.py::on_upload`), held in Gradio's `gr.State` —
+the uploaded file (`apps/gradio_app.py::on_upload`), held in Gradio's `gr.State` —
 never merged into the shared corpus index, so one visitor's upload is
 never visible to another, and the shared index never grows unbounded
 across many uploads from many people.
@@ -98,7 +104,7 @@ the `GROQ_API_KEY` secret for the LLM explanation layer.
 ## New changes made on November 2026
 Your Groq models were retired. Groq shut down both llama-3.1-8b-instant and llama-3.3-70b-versatile on 16 August 2026, which matches the model_not_found errors in your log. Your API key and the app code were fine. That’s why the AI analysis stopped working a few weeks ago.
 
-Groq’s official replacements are openai/gpt-oss-20b (the fast one) and openai/gpt-oss-120b. I changed explain.py in three ways:
+Groq’s official replacements are openai/gpt-oss-20b (the fast one) and openai/gpt-oss-120b. I changed the LLM code (then `pipeline/explain.py`, now `src/patentsearch/llm/groq.py`) in three ways:
 
 New models: it now uses openai/gpt-oss-20b first, then openai/gpt-oss-120b.
 Reasoning settings: these models do hidden “thinking” that uses up tokens, so I set reasoning effort to low and raised the token limit from 700 to 1500. Otherwise the answer could be cut off or come back empty.

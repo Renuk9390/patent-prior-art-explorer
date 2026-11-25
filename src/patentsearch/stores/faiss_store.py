@@ -13,26 +13,9 @@ thousands of documents, swapping IndexFlatIP for an approximate index
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 import numpy as np
 
-
-@dataclass
-class Chunk:
-    """A single retrievable unit of text, plus the metadata needed to display it."""
-
-    text: str
-    doc_id: str
-    doc_title: str
-    domain: str
-    url: str | None = None
-
-
-@dataclass
-class SearchResult:
-    chunk: Chunk
-    score: float
+from patentsearch.core.types import Chunk, SearchResult
 
 
 class VectorStore:

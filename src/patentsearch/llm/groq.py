@@ -1,30 +1,15 @@
 """
-Explainability layer.
+Optional LLM layer: structured prior-art analysis via a free Groq-hosted model.
 
-Two parts, deliberately layered so the demo never depends on the
-fragile one to function:
-
-  1. `explain_match()` -- always runs. Fully local, free, deterministic.
-     Splits the matched chunk into sentences, scores each sentence's
-     embedding similarity to the query, and returns the top-scoring
-     sentences as evidence for highlighting.
-
-  2. `llm_explain()` -- optional. If GROQ_API_KEY is configured, calls
-     a free Groq-hosted LLM for structured prior-art analysis including
-     a Novelty Gap Graph. Returns None (never raises) on any failure.
-
-  3. `parse_novelty_graph()` -- parses the NOVELTY GAP GRAPH section
-     of an LLM response into structured node/edge data ready to render.
+If GROQ_API_KEY is configured, `llm_explain()` asks the model for matching
+concepts, supported query elements, a relevance explanation and a Novelty
+Gap Graph. Returns None (never raises) on any failure, so the rest of the
+app keeps working without it.
 """
 
 from __future__ import annotations
 
-import html
 import os
-import re
-
-from .chunking import split_sentences
-from .embeddings import embed_passages, embed_query
 
 # Primary model can be overridden without a code change by setting a
 # GROQ_MODEL variable in the Space settings. Fallbacks are tried in order
@@ -44,30 +29,6 @@ _NON_CHAT_HINTS = ("whisper", "guard", "safeguard", "tts", "orpheus",
 # Last failure reason, surfaced in the UI so a silent outage is visible.
 LAST_LLM_ERROR: str | None = None
 _GROQ_TIMEOUT_SECONDS = 20
-
-
-def explain_match(query: str, chunk_text: str, top_n: int = 2) -> dict:
-    """Score each sentence in `chunk_text` against the query."""
-    sentences = split_sentences(chunk_text)
-    if not sentences:
-        return {"sentences": [], "highlighted": []}
-
-    query_vec = embed_query(query)
-    sentence_vecs = embed_passages(sentences)
-    scores = sentence_vecs @ query_vec
-
-    ranked = sorted(
-        zip(sentences, scores.tolist()), key=lambda pair: pair[1], reverse=True
-    )
-    highlighted = [s for s, _ in ranked[:top_n]]
-
-    return {
-        "sentences": [
-            {"text": s, "score": sc, "highlighted": s in highlighted}
-            for s, sc in zip(sentences, scores.tolist())
-        ],
-        "highlighted": highlighted,
-    }
 
 
 def llm_explain(query: str, chunk_text: str, highlighted: list[str]) -> str | None:
@@ -224,91 +185,3 @@ def llm_explain(query: str, chunk_text: str, highlighted: list[str]) -> str | No
         LAST_LLM_ERROR = f"{type(exc).__name__}: {exc}"
         print(f"[llm_explain] unexpected failure: {LAST_LLM_ERROR}", flush=True)
         return None
-
-
-def parse_novelty_graph(llm_text: str) -> dict:
-    """Parse the NOVELTY GAP GRAPH section of an LLM response.
-
-    Returns a dict with:
-      claims   : {node_id: label}  e.g. {"C1": "wireless communication link"}
-      evidence : {node_id: label}  e.g. {"E1": "A wireless comm link is established..."}
-      edges    : list of (source, target, weight)  e.g. [("C1", "E1", "strong")]
-      gaps     : list of claim node_ids with no evidence  e.g. ["C4", "C5"]
-    """
-    result: dict = {"claims": {}, "evidence": {}, "edges": [], "gaps": []}
-
-    # Locate the NOVELTY GAP GRAPH block first
-    graph_match = re.search(
-        r"NOVELTY GAP GRAPH(.+?)(?=$)", llm_text, re.IGNORECASE | re.DOTALL
-    )
-    if not graph_match:
-        return result
-    graph_block = graph_match.group(1)
-
-    # ── CLAIM nodes ──────────────────────────────────────────────
-    claim_block = re.search(
-        r"CLAIM:\s*\n(.*?)(?=EVIDENCE:|GRAPH EDGES|GRAPH GAPS|$)",
-        graph_block,
-        re.IGNORECASE | re.DOTALL,
-    )
-    if claim_block:
-        for line in claim_block.group(1).splitlines():
-            m = re.match(r"\s*(C\d+)\s*:\s*(.+)", line, re.IGNORECASE)
-            if m:
-                result["claims"][m.group(1).upper()] = m.group(2).strip()
-
-    # ── EVIDENCE nodes ────────────────────────────────────────────
-    evidence_block = re.search(
-        r"EVIDENCE:\s*\n(.*?)(?=GRAPH EDGES|GRAPH GAPS|$)",
-        graph_block,
-        re.IGNORECASE | re.DOTALL,
-    )
-    if evidence_block:
-        for line in evidence_block.group(1).splitlines():
-            m = re.match(r"\s*(E\d+)\s*:\s*(.+)", line, re.IGNORECASE)
-            if m:
-                result["evidence"][m.group(1).upper()] = m.group(2).strip()
-
-    # ── GRAPH EDGES ───────────────────────────────────────────────
-    edges_block = re.search(
-        r"GRAPH EDGES\s*\n(.*?)(?=GRAPH GAPS|$)",
-        graph_block,
-        re.IGNORECASE | re.DOTALL,
-    )
-    if edges_block:
-        for line in edges_block.group(1).splitlines():
-            m = re.match(
-                r"\s*(C\d+)\s*->\s*(E\d+)\s*\((\w+)\)",
-                line,
-                re.IGNORECASE,
-            )
-            if m:
-                result["edges"].append(
-                    (m.group(1).upper(), m.group(2).upper(), m.group(3).lower())
-                )
-
-    # ── GRAPH GAPS ────────────────────────────────────────────────
-    gaps_block = re.search(
-        r"GRAPH GAPS\s*\n(.+?)$",
-        graph_block,
-        re.IGNORECASE | re.DOTALL,
-    )
-    if gaps_block:
-        for line in gaps_block.group(1).splitlines():
-            m = re.match(r"\s*(C\d+)\s*->\s*NONE", line, re.IGNORECASE)
-            if m:
-                result["gaps"].append(m.group(1).upper())
-
-    return result
-
-
-def highlight_html(chunk_text: str, highlighted: list[str]) -> str:
-    """Wrap highlighted sentences in <mark> tags, safely HTML-escaped."""
-    escaped = html.escape(chunk_text)
-    for sentence in sorted(highlighted, key=len, reverse=True):
-        escaped_sentence = html.escape(sentence)
-        if escaped_sentence in escaped:
-            escaped = escaped.replace(
-                escaped_sentence, f"<mark>{escaped_sentence}</mark>"
-            )
-    return escaped
