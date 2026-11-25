@@ -13,7 +13,7 @@ license: mit
 # Patent Prior-Art Explorer
 
 A small, free, explainable patent semantic search demo — built to
-accompany [Renukswamy Chikkamath's](https://your-website-url-here)
+accompany [Renukswamy Chikkamath's](https://renukswamy.com)
 PhD research in AI for patent retrieval and explainable prior-art
 search.
 

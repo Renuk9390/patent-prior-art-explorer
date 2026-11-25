@@ -1,0 +1,22 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Editors
+.vscode/
+.idea/
+
+# Notebooks
+.ipynb_checkpoints/
+
+# Local data, indexes and secrets (large files live in the HF Dataset repo)
+data/
+artifacts/
+*.faiss
+.env
