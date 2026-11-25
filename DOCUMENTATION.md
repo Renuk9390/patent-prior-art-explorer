@@ -31,11 +31,14 @@ touching the others:
 | Demo corpus | `src/patentsearch/data/demo_corpus.py` | The curated, hand-chunked set of real patents. |
 | Chunking | `src/patentsearch/ingest/chunking.py` | Splits text into retrievable passages. Uploaded PDFs are chunked automatically with a lightweight, dependency-free sentence-grouping algorithm. |
 | Embeddings | `src/patentsearch/embedders/sentence_transformer.py` | Wraps `BAAI/bge-small-en-v1.5`, a small, free, CPU-friendly embedding model. Applies the correct asymmetric query-instruction prefix that BGE models expect. |
-| Vector store | `src/patentsearch/stores/faiss_store.py` | A thin wrapper around FAISS's `IndexFlatIP` (exact cosine similarity search). |
+| Vector store | `src/patentsearch/stores/faiss_store.py` | `FaissStore`, a thin wrapper around FAISS's `IndexFlatIP` (exact cosine similarity search). |
 | Highlighting | `src/patentsearch/explain/highlight.py` | Fully local, deterministic sentence-level similarity scoring and highlighting (always runs). |
 | Novelty Gap Graph | `src/patentsearch/explain/novelty_graph.py` | Parses the graph section of the LLM's analysis into nodes and edges. |
-| LLM analysis | `src/patentsearch/llm/groq.py` | Optional structured prior-art analysis via a free Groq-hosted model; returns nothing instead of failing if unavailable. |
-| App | `apps/gradio_app.py` | Gradio UI gluing the above together. |
+| LLM analysis | `src/patentsearch/llm/groq.py` | `GroqProvider`: optional structured prior-art analysis via a free Groq-hosted model; returns nothing instead of failing if unavailable. |
+| Search service | `src/patentsearch/service.py` | `SearchService`, the single entry point the UI calls for searching, indexing uploads, highlighting and LLM analysis. The UI never calls the model, FAISS or the LLM directly. |
+| Settings | `config/demo.yaml`, `src/patentsearch/config.py` | Model name, query prefix, number of results, LLM provider and models. Another deployment points the `PATENTSEARCH_CONFIG` environment variable at its own file. |
+| Interfaces | `embedders/base.py`, `stores/base.py`, `llm/base.py` | The small contracts a replacement embedding model, vector store or LLM provider must meet. |
+| App | `apps/gradio_app.py` | Gradio UI; renders results and calls only `SearchService`. |
 | Entry point | `app.py` | Thin wrapper that HuggingFace Spaces runs; it makes `src/` importable and starts the UI. |
 
 ## Why these specific choices

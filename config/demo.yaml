@@ -1,0 +1,23 @@
+# Settings for the public demo on Hugging Face Spaces.
+# Another deployment (for example an IP firm's own server) uses its own
+# file, chosen with the PATENTSEARCH_CONFIG environment variable.
+
+embedder:
+  model_name: BAAI/bge-small-en-v1.5
+  # BGE models expect this prefix on queries (not on passages).
+  query_instruction: "Represent this sentence for searching relevant passages: "
+
+search:
+  top_k: 5                 # results shown per search
+  highlight_sentences: 2   # evidence sentences highlighted per result
+
+corpus:
+  source: demo             # "demo" = the curated patents in src/patentsearch/data
+
+llm:
+  provider: groq           # "groq" or "none"
+  # Tried in order. A GROQ_MODEL environment variable, if set, is tried first.
+  models:
+    - openai/gpt-oss-20b
+    - openai/gpt-oss-120b
+  timeout_seconds: 20

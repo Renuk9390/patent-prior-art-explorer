@@ -8,7 +8,7 @@ index types. IndexFlatIP -- exact inner-product search over normalized
 vectors, which is equivalent to cosine similarity -- is exact, simple,
 and fast enough at this scale. If the corpus ever grows into the
 thousands of documents, swapping IndexFlatIP for an approximate index
-(e.g. IndexIVFFlat) is a one-line change confined entirely to this file.
+(e.g. IndexIVFFlat or HNSW) is a change confined entirely to this file.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ import numpy as np
 from patentsearch.core.types import Chunk, SearchResult
 
 
-class VectorStore:
+class FaissStore:
     """Wraps a FAISS IndexFlatIP index alongside the chunk metadata it indexes."""
 
     def __init__(self, dim: int):

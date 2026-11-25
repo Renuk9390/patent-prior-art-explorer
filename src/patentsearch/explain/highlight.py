@@ -11,18 +11,20 @@ from __future__ import annotations
 
 import html
 
-from patentsearch.embedders.sentence_transformer import embed_passages, embed_query
+from patentsearch.embedders.base import Embedder
 from patentsearch.ingest.chunking import split_sentences
 
 
-def explain_match(query: str, chunk_text: str, top_n: int = 2) -> dict:
+def explain_match(
+    query: str, chunk_text: str, embedder: Embedder, top_n: int = 2
+) -> dict:
     """Score each sentence in `chunk_text` against the query."""
     sentences = split_sentences(chunk_text)
     if not sentences:
         return {"sentences": [], "highlighted": []}
 
-    query_vec = embed_query(query)
-    sentence_vecs = embed_passages(sentences)
+    query_vec = embedder.embed_query(query)
+    sentence_vecs = embedder.embed_passages(sentences)
     scores = sentence_vecs @ query_vec
 
     ranked = sorted(

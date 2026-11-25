@@ -34,16 +34,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import gradio as gr
 
-from patentsearch.core.types import Chunk
-from patentsearch.data import CORPUS
-from patentsearch.embedders.sentence_transformer import embed_passages, embed_query
-from patentsearch.explain.highlight import explain_match, highlight_html
+from patentsearch.explain.highlight import highlight_html
 from patentsearch.explain.novelty_graph import parse_novelty_graph
 from patentsearch.ingest.chunking import chunk_text, extract_pdf_text
-from patentsearch.llm.groq import llm_explain
-from patentsearch.stores.faiss_store import VectorStore
-
-TOP_K = 5
+from patentsearch.service import SearchService
 
 EXAMPLE_QUERIES = [
     "wireless charging of a mobile device",
@@ -372,39 +366,15 @@ CUSTOM_CSS = """
 
 # Shared, read-only, built once at process startup -- see the module
 # docstring above for why this is a global rather than gr.State.
-_CORPUS_STORE: VectorStore | None = None
+_SERVICE: SearchService | None = None
 
 
-def get_corpus_store() -> VectorStore:
-    global _CORPUS_STORE
-    if _CORPUS_STORE is None:
+def get_service() -> SearchService:
+    global _SERVICE
+    if _SERVICE is None:
         print("Loading embedding model and indexing the demo corpus...")
-        _CORPUS_STORE = _build_corpus_store()
-        print(f"Indexed {len(_CORPUS_STORE)} passages from {len(CORPUS)} patents.")
-    return _CORPUS_STORE
-
-
-def _build_corpus_store() -> VectorStore:
-    """Embed and index the curated demo corpus."""
-    chunks: list[Chunk] = []
-    texts: list[str] = []
-    for patent in CORPUS:
-        for paragraph in patent["paragraphs"]:
-            chunks.append(
-                Chunk(
-                    text=paragraph,
-                    doc_id=patent["id"],
-                    doc_title=patent["title"],
-                    domain=patent["domain"],
-                    url=patent["url"],
-                )
-            )
-            texts.append(paragraph)
-
-    embeddings = embed_passages(texts)
-    store = VectorStore(dim=embeddings.shape[1])
-    store.add(chunks, embeddings)
-    return store
+        _SERVICE = SearchService.from_config()
+    return _SERVICE
 
 
 def _parse_llm_sections(text: str) -> dict:
@@ -725,7 +695,7 @@ def _card_shell(result, query: str):
     which is fast (no LLM call involved).
     """
     chunk = result.chunk
-    explanation = explain_match(query, chunk.text, top_n=2)
+    explanation = get_service().explain(query, chunk.text)
     snippet_html = highlight_html(chunk.text, explanation["highlighted"])
 
     score_pct = f"{result.score * 100:.1f}%"
@@ -768,7 +738,7 @@ def render_card_with_llm(result, query: str, llm_text: str | None) -> str:
     if llm_text:
         llm_block = _render_llm_panel(llm_text)
     else:
-        reason = "no GROQ_API_KEY is configured" if not os.environ.get("GROQ_API_KEY") \
+        reason = "no GROQ_API_KEY is configured" if not get_service().llm_configured \
             else "the AI service did not respond (see Space logs)"
         llm_block = (
             '<div class="llm-pending">&#9888;&#65039; AI analysis &amp; novelty '
@@ -786,9 +756,7 @@ def render_card_with_llm(result, query: str, llm_text: str | None) -> str:
 def render_card(result, query: str) -> str:
     """Render a fully-resolved card synchronously (used outside the
     streaming search path, e.g. for quick manual testing)."""
-    chunk = result.chunk
-    explanation = explain_match(query, chunk.text, top_n=2)
-    llm_text = llm_explain(query, chunk.text, explanation["highlighted"])
+    llm_text = get_service().analyse(query, result.chunk.text)
     return render_card_with_llm(result, query, llm_text)
 
 
@@ -813,22 +781,12 @@ def on_upload(file_path: str | None):
         return None, "The PDF was read, but no usable text chunks were found."
 
     filename = os.path.basename(file_path)
-    chunks = [
-        Chunk(
-            text=p,
-            doc_id="uploaded",
-            doc_title=filename,
-            domain="Your uploaded document",
-            url=None,
-        )
-        for p in pieces
-    ]
-    embeddings = embed_passages(pieces)
-    store = VectorStore(dim=embeddings.shape[1])
-    store.add(chunks, embeddings)
+    store = get_service().index_texts(
+        pieces, doc_id="uploaded", doc_title=filename, domain="Your uploaded document"
+    )
 
     status = (
-        f"Indexed {len(chunks)} passages from \u201c{filename}\u201d \u2014 "
+        f"Indexed {len(store)} passages from \u201c{filename}\u201d \u2014 "
         "it will now be included alongside the demo corpus in your searches."
     )
     return store, status
@@ -855,14 +813,8 @@ def do_search(query: str, uploaded_store):
         yield "<p style='color:#6b7280;'>Type a search query above, then press Search.</p>"
         return
 
-    query_vec = embed_query(query)
-    corpus_store = get_corpus_store()
-    results = list(corpus_store.search(query_vec, top_k=TOP_K))
-    if uploaded_store is not None and len(uploaded_store) > 0:
-        results += uploaded_store.search(query_vec, top_k=TOP_K)
-
-    results.sort(key=lambda r: r.score, reverse=True)
-    results = results[:TOP_K]
+    service = get_service()
+    results = service.search(query, extra_stores=[uploaded_store])
 
     if not results:
         yield "<p style='color:#6b7280;'>No results found.</p>"
@@ -877,9 +829,7 @@ def do_search(query: str, uploaded_store):
     done: list[bool] = [False] * len(results)
 
     def fetch_llm(index: int, result):
-        chunk = result.chunk
-        explanation = explain_match(query, chunk.text, top_n=2)
-        return index, llm_explain(query, chunk.text, explanation["highlighted"])
+        return index, service.analyse(query, result.chunk.text)
 
     with ThreadPoolExecutor(max_workers=max(len(results), 1)) as pool:
         futures = [
@@ -903,7 +853,7 @@ def build_app() -> gr.Blocks:
     # Warm the model and index at startup rather than on the first
     # visitor's request, so the first search isn't slowed down by a
     # cold model load.
-    get_corpus_store()
+    get_service()
 
     with gr.Blocks(title="Patent Prior-Art Explorer") as demo:
         uploaded_store_state = gr.State(None)

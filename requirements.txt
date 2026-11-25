@@ -10,6 +10,7 @@ sentence-transformers>=3.0
 faiss-cpu>=1.7.4
 pypdf>=4.0
 numpy<3
+pyyaml>=6.0   # reads config/demo.yaml
 
 # Optional: only used by pipeline/explain.py's llm_explain(), and only
 # if a GROQ_API_KEY secret is configured on the Space. Safe to leave

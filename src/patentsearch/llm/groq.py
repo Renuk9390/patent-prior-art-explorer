@@ -11,27 +11,20 @@ from __future__ import annotations
 
 import os
 
-# Primary model can be overridden without a code change by setting a
-# GROQ_MODEL variable in the Space settings. Fallbacks are tried in order
-# if the primary is retired or unavailable (Groq rotates models over time).
-_GROQ_MODELS = [
-    m for m in (
-        os.environ.get("GROQ_MODEL"),
-        "openai/gpt-oss-20b",    # Groq's recommended replacement for llama-3.1-8b-instant
-        "openai/gpt-oss-120b",   # larger fallback
-    ) if m
-]
-
 # Model-name fragments that are NOT general chat/text models; skipped
 # during automatic discovery.
 _NON_CHAT_HINTS = ("whisper", "guard", "safeguard", "tts", "orpheus",
                    "playai", "embed", "vision-preview", "distil")
 # Last failure reason, surfaced in the UI so a silent outage is visible.
 LAST_LLM_ERROR: str | None = None
-_GROQ_TIMEOUT_SECONDS = 20
 
 
-def llm_explain(query: str, chunk_text: str, highlighted: list[str]) -> str | None:
+def llm_explain(
+    query: str,
+    chunk_text: str,
+    models: list[str],
+    timeout_seconds: float = 20,
+) -> str | None:
     """Best-effort structured prior-art analysis via a free Groq LLM.
 
     Returns the raw LLM text string (covering all four sections:
@@ -46,7 +39,7 @@ def llm_explain(query: str, chunk_text: str, highlighted: list[str]) -> str | No
     try:
         from groq import Groq
 
-        client = Groq(api_key=api_key, timeout=_GROQ_TIMEOUT_SECONDS)
+        client = Groq(api_key=api_key, timeout=timeout_seconds)
         evidence = chunk_text.strip()
 
         prompt = (
@@ -158,7 +151,7 @@ def llm_explain(query: str, chunk_text: str, highlighted: list[str]) -> str | No
                           f"{type(exc).__name__}: {exc}", flush=True)
             return None
 
-        result = try_models(_GROQ_MODELS)
+        result = try_models(models)
         if result is None:
             # Self-healing: Groq retires models regularly. Ask the API which
             # models this key can actually use and try those instead.
@@ -185,3 +178,24 @@ def llm_explain(query: str, chunk_text: str, highlighted: list[str]) -> str | No
         LAST_LLM_ERROR = f"{type(exc).__name__}: {exc}"
         print(f"[llm_explain] unexpected failure: {LAST_LLM_ERROR}", flush=True)
         return None
+
+
+class GroqProvider:
+    """LLMProvider backed by Groq's free tier.
+
+    `models` are tried in order; a GROQ_MODEL environment variable, if
+    set, is tried first, so the model can be changed in the Space
+    settings without a code change.
+    """
+
+    def __init__(self, models: list[str], timeout_seconds: float = 20):
+        override = os.environ.get("GROQ_MODEL")
+        self.models = ([override] if override else []) + [m for m in models if m != override]
+        self.timeout_seconds = timeout_seconds
+
+    @property
+    def is_configured(self) -> bool:
+        return bool(os.environ.get("GROQ_API_KEY"))
+
+    def analyse(self, query: str, passage: str) -> str | None:
+        return llm_explain(query, passage, self.models, self.timeout_seconds)
