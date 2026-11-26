@@ -63,3 +63,28 @@ def test_applicant_matching():
     assert same_applicant("Google LLC", "GOOGLE INC.")
     assert not same_applicant("Google LLC", "Microsoft Technology Licensing, LLC")
     assert not same_applicant("", None)
+
+
+def test_build_qrels_family_level():
+    import pandas as pd
+    from patentsearch.eval.qrels import build_qrels
+
+    cit = pd.DataFrame({
+        "publication_number": ["Q-A1", "Q-B2", "Q-B2", "R-A1", "R-A1"],
+        "cited":              ["D1-B2", "D1-B2", "D2-B2", "D3-B2", "EP-X"],
+        "category":           ["APP", "SEA", "APP", "SEA", "SEA"],
+    })
+    family_of = {"Q-A1": "q", "Q-B2": "q", "R-A1": "r", "D1-B2": "d1", "D2-B2": "d2", "D3-B2": "d3"}
+    qrels = build_qrels(
+        cit, family_of,
+        query_of_family={"q": "Q-A1", "r": "R-A1"},
+        corpus_doc_of_family={"d1": "D1-B2", "d2": "D2-B2", "d3": "D3-B2"},
+        query_applicants={"Q-A1": "Google LLC", "R-A1": "Acme"},
+        doc_applicants={"D1-B2": "GOOGLE INC", "D2-B2": "IBM", "D3-B2": "Other"},
+    )
+    rows = {(r.query_id, r.doc_id): (r.source, r.same_applicant) for r in qrels.itertuples()}
+    assert rows == {
+        ("Q-A1", "D1-B2"): ("both", True),        # APP on the application + SEA on the grant
+        ("Q-A1", "D2-B2"): ("applicant", False),
+        ("R-A1", "D3-B2"): ("examiner", False),   # EP-X is outside the corpus: ignored
+    }
