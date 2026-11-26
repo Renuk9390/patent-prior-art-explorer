@@ -50,3 +50,11 @@ def test_claims_on_one_line_are_split():
 def test_first_independent_claim_and_empty_input():
     assert first_independent_claim(CLAIMS).startswith("A method for training")
     assert split_claims("") == [] and build_passages("US-4", None, None) == []
+
+
+def test_long_dependent_claim_is_split():
+    claims = "1. A device. 2. The device of claim 1, wherein " + " ".join(["x"] * 600) + "."
+    passages = build_passages("US-5-B2", None, claims, max_words=250)
+    assert [p["label"] for p in passages] == [
+        "Claim 1", "Claim 2 (part 1)", "Claim 2 (part 2)", "Claim 2 (part 3)"]
+    assert max(len(p["text"].split()) for p in passages) <= 250

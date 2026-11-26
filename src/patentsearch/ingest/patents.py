@@ -6,7 +6,8 @@ Passages per patent:
   - each independent claim             -> label "Claim 1" (long claims are split:
                                           "Claim 1 (part 2)")
   - consecutive dependent claims, grouped to about `group_words` words
-                                       -> label "Claims 2-5"
+                                       -> label "Claims 2-5" (split into parts if
+                                          longer than `max_words`)
 
 Labels let a result say exactly where it matched, the way a patent
 attorney cites prior art.
@@ -118,7 +119,10 @@ def build_passages(
             return
         first, last = group[0].number, group[-1].number
         label = f"Claim {first}" if first == last else f"Claims {first}-{last}"
-        add("dependent_claims", label, " ".join(f"{c.number}. {c.text}" for c in group))
+        words = " ".join(f"{c.number}. {c.text}" for c in group).split()
+        parts = _windows(words, max_words)   # a very long dependent claim is split too
+        for k, part in enumerate(parts, start=1):
+            add("dependent_claims", label + (f" (part {k})" if len(parts) > 1 else ""), part)
         group.clear()
 
     for claim in split_claims(claims_text):
